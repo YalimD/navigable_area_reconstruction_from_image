@@ -75,61 +75,111 @@ def extract_image_lines(img):
     return lineProperties(line_segments,image)
 
 
-#By parsing the detection data, it extracts the paths of each pedestrian for 1 sec each
-def extract_pedestrian_lines(image, detection_data):
+#By parsing the detection data, it extracts the paths of each pedestrian for every x frames
+#The head-feet positions depend on the selected method; using bounding boxes or pedestrian postures
+#Note: Pedestrian postures are more prone to noise
+def extract_pedestrian_lines(image, detection_data, frames_per_check = 1, use_bounding_boxes = True, tracker_id = None):
 
     latest_loc = {}
     paths = []
 
-    frame_index  = 0
-    fps = 30; resize = 1 #default
-    seconds_per_check = 1 #Checks pedestrian data every x seconds
+    num_of_frames = 0
+    latest_frame =  0
+    # fps = 30; resize = 1 #default
+    # frames_per_check = 1
 
-    with open(detection_data) as frames:
-        for i,line in enumerate(frames):
-            if i == 0:
-                l = line.split()
-                fps = int(l[-1])
-                resize = int(l[-2])
-            # Parse the pedestrian location
-            elif i - 1 == frame_index * fps * seconds_per_check:
-                frame_index += 1
-                locations = line.split(",")[1:]
+    use_bounding_boxes = False
 
-                # Every 7 values is an agent
-                agents = [locations[i * 7:(i + 1) * 7] for i in range(len(locations) // 7)]
+    with open(detection_data) as detections:
+        for i, line in enumerate(detections):
 
-                for agent in agents:
+            #Checks pedestrian data every x frames
+            #Read the line
+            agent = line.split(',')
+            frameID = int(agent[0])
 
-                    #Current agent
-                    headPos = (int(int(agent[1]) * resize),(float(agent[2]) - float(agent[6]) / 2) * resize)
-                    feetPos = (int(int(agent[1]) * resize),(float(agent[2]) + float(agent[6]) / 2) * resize)
+            #Check every frames_per_check
+            if frameID > latest_frame:
+                latest_frame = frameID
+                num_of_frames += 1
+            if num_of_frames % frames_per_check == 0 and (tracker_id is None or int(agent[1]) == tracker_id):
 
-                    try:
-                        #If the agent id is not found in the dictionary, this will raise KeyError
-                        prev_pos = latest_loc[agent[0]]
+                # Different methods for extracting head and feet
+                if not use_bounding_boxes:
+                    #Add the agent id to the dictionary latest_loc
+                    headPos = list(map(float, agent[-2].split('/')))
+                    feetPos = list(map(float, agent[-1].split('/')))
+                else:
+                    pos = list(map(float,agent[2:6]))
+                    headPos = [pos[0] + pos[2] / 2, pos[1]]
+                    feetPos = [pos[0] + pos[2] / 2, pos[1] + pos[3]]
 
-                        head_path = [prev_pos[0], headPos]
-                        feet_path = [prev_pos[1], feetPos]
+                try:
+                    prev_pos = latest_loc[agent[1]]
 
-                        #Detect and remove outliers.
-                        #Outliers are inconsistent detection box sizes. For example, a detection box that
-                        #shrinks while getting closer to the camera is considered as an outlier
-                        currentHeight = feetPos[1] - headPos[1]
-                        prev_height = prev_pos[1][1] - prev_pos[0][1]
-                        size_increased = currentHeight > prev_height
-                        higher_position = (headPos[1] + feetPos[1])/2 < (prev_pos[0][1] + prev_pos[1][1])/2
+                    head_path = [prev_pos[0], headPos]
+                    feet_path = [prev_pos[1], feetPos]
 
-                        if size_increased ^ higher_position:
-                            # The paths are held as pairs
-                            paths.extend((head_path, feet_path))
-                            latest_loc[agent[0]] = [headPos, feetPos]
+                    # Detect and remove outliers.
+                    # Outliers are inconsistent detection box sizes. For example, a detection box that
+                    # shrinks while getting closer to the camera is considered as an outlier
+                    currentHeight = np.linalg.norm(np.array(feetPos) - np.array(headPos))
+                    prev_height = np.linalg.norm(np.array(prev_pos[1]) - np.array(prev_pos[0]))
+                    size_increased = currentHeight > prev_height
+                    higher_position = (headPos[1] + feetPos[1]) / 2 < (prev_pos[0][1] + prev_pos[1][1]) / 2
 
-                    except KeyError:
-                        latest_loc[agent[0]] = [headPos, feetPos]
+                    if size_increased ^ higher_position:
+                        # The paths are held as pairs
+                        paths.extend((head_path, feet_path))
+                        latest_loc[agent[1]] = [headPos, feetPos]
 
+                except:
+                    latest_loc[agent[1]] = [headPos, feetPos]
 
-    frames.close()
+            # else:
+            #
+            #     # if i == 0:
+            #     #     l = line.split()
+            #     #     fps = int(l[-1])
+            #     #     resize = int(l[-2])
+            #     # # Parse the pedestrian location
+            #     # elif i - 1 == frame_index * fps * seconds_per_check:
+            #     #     frame_index += 1
+            #     #     locations = line.split(",")[1:]
+            #     #
+            #     #     # Every 7 values is an agent
+            #     #     agents = [locations[i * 7:(i + 1) * 7] for i in range(len(locations) // 7)]
+            #     #
+            #     #     for agent in agents:
+            #     #
+            #     #         #Current agent
+            #     #         headPos = (int(int(agent[1]) * resize),(float(agent[2]) - float(agent[6]) / 2) * resize)
+            #     #         feetPos = (int(int(agent[1]) * resize),(float(agent[2]) + float(agent[6]) / 2) * resize)
+            #     #
+            #     #         try:
+            #     #             #If the agent id is not found in the dictionary, this will raise KeyError
+            #     #             prev_pos = latest_loc[agent[0]]
+            #     #
+            #     #             head_path = [prev_pos[0], headPos]
+            #     #             feet_path = [prev_pos[1], feetPos]
+            #     #
+            #     #             #Detect and remove outliers.
+            #     #             #Outliers are inconsistent detection box sizes. For example, a detection box that
+            #     #             #shrinks while getting closer to the camera is considered as an outlier
+            #     #             currentHeight = feetPos[1] - headPos[1]
+            #     #             prev_height = prev_pos[1][1] - prev_pos[0][1]
+            #     #             size_increased = currentHeight > prev_height
+            #     #             higher_position = (headPos[1] + feetPos[1])/2 < (prev_pos[0][1] + prev_pos[1][1])/2
+            #     #
+            #     #             if size_increased ^ higher_position:
+            #     #                 # The paths are held as pairs
+            #     #                 paths.extend((head_path, feet_path))
+            #     #                 latest_loc[agent[0]] = [headPos, feetPos]
+            #     #
+            #     #         except KeyError:
+            #     #             latest_loc[agent[0]] = [headPos, feetPos]
+
+    detections.close()
 
     return lineProperties(paths, image)
 
@@ -185,67 +235,75 @@ def edgelet_lines(edgelets):
     lines = np.concatenate((normals, p[:, np.newaxis]), axis=1)
     return lines
 
-
-
 #Determines the vanishing points on horizon using information coming from pedestrian paths
-def determineVPfromPaths(path_lines,image):
+#OR uses the trajectory information and/or edges from the image to detect vanishing points
+#which will determine the horizon
+def determineVP(path_lines,image, plot_axis, asTrajectory = False):
+
+    # vp_determination_methods = {'posture':[posture_lines, False, None], 'single':[posture_lines, False, [10]],
+    #                             'bb':[bb_lines,False,None],'trajectory':[posture_lines,True, None],
+    #                             'hough':[image_lines,True, None], 'trajectory_hough':[posture_lines + image_lines, True, None]}
 
     centers, directions, strengths = path_lines
     normals = edgelet_lines(path_lines)
 
-    plt.figure(figsize=(10, 10))
-    plt.imshow(image)
-
     vxs = []
-    vys= []
+    vys = []
 
-    for i in range(len(normals)//2):
-        # plt.clf()
-        # plt.imshow(image)
-        plt.plot([centers[2*i][0] - (directions[2*i][0] * strengths[2*i]),
-                  centers[2 * i][0] + (directions[2 * i][0] * strengths[2 * i])],
-                 [centers[2 * i][1] - (directions[2 * i][1] * strengths[2 * i]),
-                  centers[2 * i][1] + (directions[2 * i][1] * strengths[2 * i])], 'r-')
+    if not asTrajectory:
 
-        plt.plot([centers[2*i+1][0] - (directions[2*i+1][0] * strengths[2*i+1]),
-                  centers[2 * i+1][0] + (directions[2 * i+1][0] * strengths[2 * i+1])],
-                 [centers[2 * i+1][1] - (directions[2 * i+1][1] * strengths[2 * i+1]),
-                  centers[2 * i+1][1] + (directions[2 * i+1][1] * strengths[2 * i+1])], 'r-')
+        for i in range(len(normals)//2):
 
-        head = normals[2*i]
-        feet = normals[2*i+1]
+            # plt.clf()
+            # plt.imshow(image)
+            plot_axis.plot([centers[2*i][0] - (directions[2*i][0] * strengths[2*i]),
+                      centers[2 * i][0] + (directions[2 * i][0] * strengths[2 * i])],
+                     [centers[2 * i][1] - (directions[2 * i][1] * strengths[2 * i]),
+                      centers[2 * i][1] + (directions[2 * i][1] * strengths[2 * i])], 'r-')
 
-        vx,vy,n = np.cross(head,feet); vx /= n; vy /= n
-        if math.isfinite(vx) and math.isfinite(vy):
-            vxs.append(vx)
-            vys.append(vy)
-        plt.plot([vx],[vy],'bo')
+            plot_axis.plot([centers[2*i+1][0] - (directions[2*i+1][0] * strengths[2*i+1]),
+                      centers[2 * i+1][0] + (directions[2 * i+1][0] * strengths[2 * i+1])],
+                     [centers[2 * i+1][1] - (directions[2 * i+1][1] * strengths[2 * i+1]),
+                      centers[2 * i+1][1] + (directions[2 * i+1][1] * strengths[2 * i+1])], 'r-')
 
+            head = normals[2*i]
+            feet = normals[2*i+1]
 
-    #Use RANSAC to determine the vanishing line
+            vx,vy,n = np.cross(head,feet); vx /= n; vy /= n
+            if math.isfinite(vx) and math.isfinite(vy):
+                vxs.append(vx)
+                vys.append(vy)
+                plot_axis.plot([vx],[vy],'bo')
+            # plt.show()
 
-    #TODO: Which top percentige of the points needs to be considered in order to
-    #get a good result on vanishing point
-    ransac_ratio = 0.3
+        #Use RANSAC to determine the vanishing line
 
-    sorted_ind = np.argsort(vys)
-    sorted_ind = sorted_ind[:int(len(sorted_ind) * ransac_ratio)]
+        # Parameter: Which top percentige of the points needs to be considered in order to get a good result on vanishing point
+        ransac_ratio = 1
 
-    vxs = np.array(vxs).reshape(-1, 1)[sorted_ind]
-    vys = np.array(vys).reshape(-1, 1)[sorted_ind]
+        sorted_ind = np.argsort(vys)
+        sorted_ind = sorted_ind[:int(len(sorted_ind) * ransac_ratio)]
 
-    ransac = linear_model.RANSACRegressor()
-    ransac.fit(vxs,vys)
-    line_X = np.arange(vxs.min(), vxs.max())[:, np.newaxis]
-    line_y_ransac = ransac.predict(line_X)
-    plt.plot(line_X, line_y_ransac, color='g')
+        vxs = np.array(vxs).reshape(-1, 1)[sorted_ind]
+        vys = np.array(vys).reshape(-1, 1)[sorted_ind]
 
-    plt.show()
+        ransac = linear_model.RANSACRegressor()
+        ransac.fit(vxs,vys)
+        line_X = np.arange(vxs.min(), vxs.max())[:, np.newaxis]
+        line_Y = ransac.predict(line_X)
 
-    vp_left = (line_X[0][0],line_y_ransac[0][0])
-    vp_right = (line_X[-1][0],line_y_ransac[-1][0])
-    return [vp_left, vp_right]
+    else:
+        # TODO: Get the ransac method here
+        pass
 
+    plot_axis.plot(line_X, line_Y, color='g')
+
+    # plt.show()
+
+    vp_left = (line_X[0][0], line_Y[0][0])
+    vp_right = (line_X[-1][0], line_Y[-1][0])
+
+    return [vp_left,vp_right]
 
 #This function rotates the image according to the angle of the horizon in order to allign the horizon
 #"horizontally"
@@ -258,6 +316,7 @@ def allignHorizon(image, horizon):
     row,col,_ = image.shape
 
     #Rotation without cropping (Thanks to Adrian Rosebrock for explanation)
+	# https://www.pyimagesearch.com/2017/01/02/rotate-images-correctly-with-opencv-and-python/
     centerx, centery = col // 2,row // 2
 
     rot = cv2.getRotationMatrix2D((centerx, centery), angle, 1)
@@ -326,90 +385,51 @@ def applyHomography(allignedImg, leftVP, rightVP):
         rightCorner
     ], np.float)
 
-    resize = 0.40  #Resize the resulting image
-    resize = 1 - resize
+    # resize = 0.40  #Resize the resulting image
+    # resize = 1 - resize
+    # Old where the plane is enlarged
+    # mappedPos = np.array([
+    #     [width * resize / 2, height * (1 - resize / 2)],
+    #     [width * resize / 2, height * resize / 2],
+    #     [width * (1 - resize / 2), height * resize / 2],
+    #     [width * (1 - resize / 2), height * (1 - resize / 2)]
+    # ], np.float)
 
+    # New, where the plane is shrunk
     mappedPos = np.array([
-        [width * resize / 2, height * (1 - resize / 2)],
-        [width * resize / 2, height * resize / 2],
-        [width * (1 - resize / 2), height * resize / 2],
-        [width * (1 - resize / 2), height * (1 - resize / 2)]
+        [leftVP[0],height],
+        leftVP,
+        rightVP,
+        [rightVP[0], height]
     ], np.float)
 
-
-    #TODO: Decompose this homography
+    #TODO: Decompose this homography. he he he
     homo, status = cv2.findHomography(homographyPlane, mappedPos);
-    img_wrapped_segmented = cv2.warpPerspective(allignedImg, homo,
+    img_wrapped = cv2.warpPerspective(allignedImg, homo,
                                                 (width,
                                                  height));
 
-    cv2.imshow("The wrapped result",img_wrapped_segmented)
+    print("The homography {}".format(homo))
+
+    cv2.imshow("The wrapped result",img_wrapped)
     cv2.waitKey(0)
     cv2.destroyAllWindows()
 
-    return img_wrapped_segmented
-
-
-def extract_pedestrian_majors(video):
-
-    #Create background subtractor
-    #Process the frames until it gets a good result on background
-    #Then get the frame for each second
-    #Detect blobs and their major axis each. We did this in the shadow part too
-    #Adjust the strength of the major axis as long as the blob
-    #Write the lines and test
-
-    capture = cv2.VideoCapture(video)
-    if not capture.isOpened:
-        print ("Video file: {} is not found".format(video))
-
-    # backgroundSubtractor = cv2.createBackgroundSubtractorMOG2(200,32,detectShadows=True)
-    #CNT is too noisy but can be cleared using erosion
-    #GSOC has a lot of initial noise, but gets better in time
-    #LSBP has a lot of noise
-    backgroundSubtractor = cv2.bgsegm.createBackgroundSubtractorMOG()
-
-    cv2.namedWindow("Processed Video")
-    cv2.namedWindow("Original Video")
-
-    while capture.isOpened:
-        ret, frame = capture.read()
-
-        if not ret:
-            capture.release()
-            capture.open(video)
-            continue
-
-        foreground_mask = backgroundSubtractor.apply(frame,0.9)
-
-        #Shadows aren't really detected therefore not removed here
-        print(len(np.where(foreground_mask == 127)))
-        ret, foreground_mask = cv2.threshold(foreground_mask,128,255,cv2.THRESH_BINARY)
-
-        cv2.imshow("Processed Video",foreground_mask)
-        cv2.imshow("Original Video", frame)
-        cv2.waitKey(30)
+    return img_wrapped
 
 
 
-#TODO: UI adjustments are necessary
-#TODO: RANSAC can be improved and some elements can be corrected
 #TODO: Redundant code exists
 #TODO: Find K using pedestrian postures and lines in the image
-#TODO: Also include the effect of the lines in the image when finding the horizon
 if __name__ == "__main__":
 
-
-    extract_pedestrian_majors("D:\VideoRVO\Data\BaseVideos\RVOVideos\P1070088.mp4")
-
-
     print("Welcome to the perspective corrector")
-    aparser = argparse.ArgumentParser()
-    aparser.add_argument("--image", help = "Image to be perspectively corrected", default="test_shadowClear.jpg")
-    aparser.add_argument("--segmented", help = "Segmented version of the given image", default = "segmented.png")
-    aparser.add_argument("--detection", help = "Detection txt to be used", default = "output.txt")
-    # aparser.add_argument("--verbose", help = "Display certain elements for debugging",
-    #                      action="store_true")
+
+    aparser = argparse.ArgumentParser(description="Using the image perspective cues and pedestrian detection data"
+                                                  "in order to rectify the ground plane to be used for navigation")
+    aparser.add_argument("--image", help = "Image to be perspectively corrected")
+    aparser.add_argument("--segmented", help = "Segmented version of the given image")
+    aparser.add_argument("--detection", help = "Detection txt to be used")
 
     args = vars(aparser.parse_args())
 
@@ -422,39 +442,55 @@ if __name__ == "__main__":
     segmented_img = cv2.imread(segmented_img_path)
 
     cv2.imshow("Image to be corrected", image)
-    #cv2.waitKey(0)
+    cv2.waitKey(5)
 
     # Extract the lines from the image.
-    # TODO: UNUSED FOR NOW, WE MAY TRY COMBINING IT WITH LINES WE FOUND FROM PEDESTRIAN PATHS
-    #image_lines = extract_image_lines(image)
+    image_lines = extract_image_lines(image)
 
-    #Extract the pedestrian paths as lines
-    path_lines = extract_pedestrian_lines(np.copy(image), detection_data_file)
-    horizon = determineVPfromPaths(path_lines,np.copy(image)) #As a line; two endpoints
+    #Extract the pedestrian paths as lines (postures or bounding boxes)
+    posture_lines = extract_pedestrian_lines(np.copy(image), detection_data_file, 50,  False)
+    posture_lines_single = extract_pedestrian_lines(np.copy(image), detection_data_file, 10, False, 144) # Parameter
+    bb_lines = path_lines = extract_pedestrian_lines(np.copy(image), detection_data_file)
+
+    # - Postures as both feet and head trajectories (too sensitive to noise, not preferable)
+    # - Single tracker posture (better than above)
+    # - BB's head and feet postures again sensitive to noise
+    # - Feet Trajectory only, RANSAC based
+    # - Feet Trajectory + Hough Lines from the navigable area, RANSAC based
+    # - Hough Lines from navigable area only
+    #TODO: Need not segmented, masked version of the navigable area
+
+    vp_determination_methods = {'single':[posture_lines_single, False], 'posture':[posture_lines, False],
+                                'bb':[bb_lines,False],'trajectory':[posture_lines,True],
+                                'hough':[image_lines,True], 'trajectory_hough':[posture_lines + image_lines, True]}
+
+    row = 3
+    col = 2
+    fig, axis = plt.subplots(row, col)
+
+    for i, k in enumerate(vp_determination_methods):
+        lines = vp_determination_methods[k][0]
+
+        plot_axis = axis[i//col,i%col]
+        # plot_axis.figure()
+        plot_axis.set_title(str(k))
+        plot_axis.imshow(image)
+        horizon = determineVP(lines, np.copy(image), plot_axis= plot_axis, asTrajectory=vp_determination_methods[k][1])
+
+    plot_axis.show()
+
     print("Horizon found: {}".format(horizon))
-
-    #Rotate the image according to the found horizon, sot he horizon is alligned horizontally
-    allignedImg, leftVP, rightVP = allignHorizon(segmented_img, horizon)
-
-    #Generate the polygon representing the ground plane
-    img_wrapped_segmented = applyHomography(allignedImg,leftVP, rightVP)
-    cv2.imwrite("segmented_birdview.jpg",img_wrapped_segmented)
-
-    #TODO: Since the resulting image is small, we need to zoom in using
-    #bounding box size of the contour
-
-    #Extract major axes of pedestrians from given background subtracted images
-    #WIP using tensorflow
-    #pedestrian_majors = extract_pedestrian_majors(video)
-
-    # Cluster the edges
-    #edge_clusters = cluster_edges(edges)
-
-    # Find Vanishing points
-
-    # Rectify image
-
-    # Show result
+    #
+    # # Rotate the image according to the found horizon, sot he horizon is alligned horizontally
+    # # TODO: This might be unnecessary
+    # allignedImg, leftVP, rightVP = allignHorizon(segmented_img, horizon)
+    #
+    # # Generate the polygon representing the ground plane
+    # # img_wrapped_segmented = applyHomography(allignedImg, leftVP, rightVP)
+    # # cv2.imwrite("segmented_birdview.jpg", img_wrapped_segmented)
+    #
+    # img_wrapped = applyHomography(image, leftVP, rightVP)
+    # # cv2.imwrite("birdview.jpg", img_wrapped)
 
 
 # #TODO: Relook at that bin based papers.
