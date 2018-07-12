@@ -66,7 +66,6 @@ def extract_image_lines(img):
 
     return lineProperties(line_segments,image)
 
-
 #By parsing the detection data, it extracts the paths of each pedestrian for every x frames
 #The head-feet positions depend on the selected method; using bounding boxes or pedestrian postures
 #Note: Pedestrian postures are more prone to noise
@@ -97,7 +96,7 @@ def parse_pedestrian_detection(image, detection_data, frames_per_check = 10, use
             if frameID > latest_frame:
                 latest_frame = frameID
                 num_of_frames += 1
-            if num_of_frames % frames_per_check == 0 and (tracker_id is None or int(agent[1]) == tracker_id):
+            if num_of_frames % frames_per_check == 0 and (tracker_id is None or int(agent[1]) in tracker_id):
 
                 # Different methods for extracting head and feet
                 if not use_bounding_boxes:
@@ -182,7 +181,6 @@ def parse_pedestrian_detection(image, detection_data, frames_per_check = 10, use
     detections.close()
 
     return lineProperties(paths, image), lineProperties(postures, image)
-
 
 #Extracts the line properties from given line segments
 #Returns centers, directions and strengths
@@ -269,11 +267,8 @@ def determineVP(path_lines,image, plot_axis, asTrajectory = False):
 
         #Use RANSAC to determine the vanishing line
 
-        # Parameter: Which top percentige of the points needs to be considered in order to get a good result on vanishing point
-        ransac_ratio = 1
-
         sorted_ind = np.argsort(vys)
-        sorted_ind = sorted_ind[:int(len(sorted_ind) * ransac_ratio)]
+        sorted_ind = sorted_ind[:int(len(sorted_ind))]
 
         vxs = np.array(vxs).reshape(-1, 1)[sorted_ind]
         vys = np.array(vys).reshape(-1, 1)[sorted_ind]
@@ -287,6 +282,8 @@ def determineVP(path_lines,image, plot_axis, asTrajectory = False):
         vp_right = (line_X[-1][0], line_Y[-1][0],1)
 
     else:
+
+        #Using RANSAC method on trajectories
         model = ransac_vanishing_point(path_lines)
         vp1 = model / model[2]
         plot_axis.plot(vp1[0], vp1[1], 'bo')
@@ -318,7 +315,7 @@ def determineVP(path_lines,image, plot_axis, asTrajectory = False):
 
 #Problem: The zenith vanishing point appears at the same side of the vanishing line against center of the image, which is impossible
 #Solution: Find the distance to both and if distance to center is longer than the distance to horizon, ignore model
-#Needs: center point and
+#Needs: center point
 def ransac_zenith_vp(edgelets, horizon, image_center, num_ransac_iter=2000, threshold_inlier=5):
     locations, directions, strengths = edgelets
     lines = edgelet_lines(edgelets)
@@ -370,7 +367,6 @@ def ransac_zenith_vp(edgelets, horizon, image_center, num_ransac_iter=2000, thre
     center_vp_dist = (np.linalg.norm(best_model[:2] - image_center[:2]))
     center_hor_dist = np.dot(np.array(image_center),horizon_homogenous)
     focal_length = np.sqrt(center_vp_dist * center_hor_dist)
-
 
     return best_model, focal_length
 
@@ -505,6 +501,12 @@ def remove_inliers(model, edgelets, threshold_inlier=10):
 #"horizontally"
 def allignHorizon(image, horizon):
 
+    height,width,_ = image.shape
+    ll_Corner = [0,height]
+    lr_Corner = [width, height]
+    ul_Corner = [0,0]
+    ur_Corner = [width, 0]
+
     angle = np.arctan((horizon[1][1] - horizon[0][1]) / (horizon[1][0] - horizon[0][0]))
     angle *= (180 / np.pi)
     print("Original angle of the horizon: {}".format(angle))
@@ -536,7 +538,7 @@ def allignHorizon(image, horizon):
 
         #Interpolation variable adjusts how lower the top line of the polygon to be used for homography
         #is going to be lower than horizon.
-        vpheight = 0.9
+        vpheight = 1 # Parameter
         leftP  = (int(horizonImgCen[0] * vpheight), int(horizonImgCen[1] * vpheight + leftCorner[1] * (1-vpheight)))
         rightP = (int(horizonImgCen[0] * vpheight + rightCorner[0] * (1 - vpheight)),
                   int(horizonImgCen[1] * vpheight + rightCorner[1] * (1 - vpheight)))
@@ -551,6 +553,8 @@ def allignHorizon(image, horizon):
     rot[0, 2] += (newwidth / 2) - centerx
     rot[1, 2] += (newheight / 2) - centery
 
+    # rot = np.eye(2,3)
+
     #We need to put this rotation matrix in use when projecting
     dst = cv2.warpAffine(image, rot, (newwidth, newheight))
 
@@ -558,54 +562,54 @@ def allignHorizon(image, horizon):
     plt.imshow(cv2.cvtColor(dst,cv2.COLOR_BGR2RGB))
 
     plt.plot([leftP[0],rightP[0]], [leftP[1],rightP[1]], 'bo')
-    plt.plot()
 
     print("Left {}".format(leftP))
     print("Right {}".format(rightP))
 
-    return dst, [*leftP,1], [*rightP,1]
+    #The corners needs to be translated as well
+    #TODO: THE UPPER IMAGE CORNERS DON'T HELP AS THEY SOMETIMES GET LOST IN THE PROJECTION. OBTAIN THE
+    #horizonximageborders by
+    # Cross product the two points of the horizon (before rotation
+    # )
+    # Create lines from both left and right of the image
+    # Cross product on both to get the corresponding points
+    corners = [ul_Corner, ur_Corner, lr_Corner, ll_Corner]
 
+    left_border = np.cross(corners[0],corners[3])
+    right_border = np.cross(corners[1],corners[2])
+    right_border = right_border / right_border[2]
 
-#Apply the homography to the image according to the points found on
-#lines that meet at the horizon
-#TODO: Alligned image is not necessary, just determine the angle that is required
-#for adjustment
-def applyHomography(allignedImg, leftVP, rightVP, vp_method="posture"):
+    horizon_line = np.cross(horizon[0],horizon[1])
 
-    #Old, imaginary plane solution
+    corners[0] = np.cross(left_border, horizon_line)
+    corners[0] = corners[0] / corners[0][2]
+    corners[1] = np.cross(right_border, horizon_line)
+    corners[1] = corners[1] / corners[1][2]
+
+    rot_homo = np.eye(3)
+    rot_homo[0,:] = rot[0]
+    rot_homo[1,:] = rot[1]
+
+    corners = perspectiveCorrectCorners(corners, rot_homo)
+
+    plt.title("The allign horizon result of fitPLane with " )
+    for i in range(len(corners)):
+        plt.plot([corners[i][0], corners[(i + 1) % 4][0]], [corners[i][1], corners[(i + 1) % 4][1]], 'b')
+
+    plt.show()
+
+    return dst, [*leftP,1], [*rightP,1], corners
+
+#Apply the stratified method of homography to the image
+def applyStratifiedHomography(allignedImg, leftVP, rightVP, trajectories, vp_method="posture"):
 
     height,width,_ = allignedImg.shape
-    leftCorner = [0,height]
-    rightCorner = [width, height]
+    ll_Corner = [0,height]
+    lr_Corner = [width, height]
+    ul_Corner = [0,0]
+    ur_Corner = [width, 0]
 
-    homographyPlane = np.array(
-    [
-        leftCorner,
-        leftVP[:2],
-        rightVP[:2],
-        rightCorner
-    ], np.float)
-
-    # resize = 0.40  #Resize the resulting image
-    # resize = 1 - resize
-    # Old where the plane is enlarged
-    # mappedPos = np.array([
-    #     [width * resize / 2, height * (1 - resize / 2)],
-    #     [width * resize / 2, height * resize / 2],
-    #     [width * (1 - resize / 2), height * resize / 2],
-    #     [width * (1 - resize / 2), height * (1 - resize / 2)]
-    # ], np.float)
-
-    # New, where the plane is shrunk
-    mappedPos = np.array([
-        [leftVP[0],height],
-        leftVP[:2],
-        rightVP[:2],
-        [rightVP[0], height]
-    ], np.float)
-
-    homo_fitPlane, status = cv2.findHomography(homographyPlane, mappedPos)
-
+    from skimage import transform
 
     #Find the definition of the vanishing line as homogenous coordinates
     horizon = np.cross(leftVP,rightVP)
@@ -618,52 +622,98 @@ def applyHomography(allignedImg, leftVP, rightVP, vp_method="posture"):
 
     print("P:{} with left {} and right {}".format(P,leftVP,rightVP))
 
-    a = 1.3
-    b = 0.12
+    # img_wrapped_projection = transform.warp(allignedImg, np.linalg.inv(P),output_shape=(height * 3, width * 3),clip = False)
+
+    #Determine a and b for the affine component of the homography
+    intersections, mean_intersection = extract_circular_points(trajectories, P)
+
     A = np.eye(3,3)
-    A[0,0] = 1 / b
-    A[0,1] = -a / b
+    a = np.nan; b = np.nan
+
+    if len(mean_intersection) > 0:
+        a = mean_intersection[0]
+        b = mean_intersection[1]
+
+        A[0,0] = 1 / b
+        A[0,1] = -a / b
 
     homo_stratified = np.dot(A, P)
 
-    print("The homography old: {} and stratified: {}".format(homo_fitPlane, homo_stratified))
+    # Translation is related to the horizon and bottom 2 points of the scene (it is assumed that the horizon is always
+    # over the central point of the camera as we are in birdview
 
-    from skimage import transform
+    T = np.array([[2,0,100],[0,2,100],[0,0,1]])
+    homo_stratified = np.dot(T,homo_stratified)
+
 
     resize = 1 #As the resulting image is very big, it needs to be scaled down
+    from skimage.transform import ProjectiveTransform
     img_wrapped_stratified = transform.warp(allignedImg, np.linalg.inv(homo_stratified),
-                                                output_shape=(int(width * resize),
-                                                 int(height * resize)
+                                                output_shape=(int(height * resize),
+                                                 int(width * resize)
                                                  ))
 
+    plt.title("Stratified image with method {} with a:{} and b:{} ".format(vp_method,a,b))
+    plt.imshow(img_wrapped_stratified)
 
-    img_wrapped_projection = cv2.warpPerspective(allignedImg, P,
-                                                (int(width * resize),
-                                                 int(height * resize)
-                                                 ))
+    corners = [ul_Corner, ur_Corner, lr_Corner, ll_Corner]
+    corners = transform.matrix_transform(corners, homo_stratified)
 
-    img_wrapped_affine= cv2.warpPerspective(allignedImg, A,
-                                                (int(width * resize),
-                                                 int(height * resize)
-                                                 ))
+    for i in range(len(corners)):
+        plt.plot([corners[i][0],corners[(i+1)%4][0]], [corners[i][1],corners[(i+1) % 4][1]], 'b')
+
+    plt.show()
+
+    return img_wrapped_stratified
+
+
+def applyParametretizedHomography(allignedImg, leftVP, rightVP, corners, vp_method="posture"):
+
+    height,width,_ = allignedImg.shape
+    ll_Corner = [0,height]
+    lr_Corner = [width, height]
+    ul_Corner = [0,0]
+    ur_Corner = [width, 0]
+
+    #Fit the imagginary plane on the image, that is going to be used for homography
+    homographyPlane = np.array(
+    [
+        ll_Corner,
+        leftVP[:2],
+        rightVP[:2],
+        lr_Corner
+    ], np.float)
+
+    # New, where the plane is shrunk
+    mappedPos = np.array([
+        [leftVP[0],height],
+        leftVP[:2],
+        rightVP[:2],
+        [rightVP[0], height]
+    ], np.float)
+
+    homo_fitPlane, status = cv2.findHomography(homographyPlane, mappedPos)
+    # homo_fitPlane = np.eye(3)
 
     img_wrapped_fitPlane = cv2.warpPerspective(allignedImg, homo_fitPlane,
-                                                (allignedImg.shape[1]*2,
-                                                 allignedImg.shape[0]*2
+                                                (allignedImg.shape[1],
+                                                 allignedImg.shape[0]
                                                  ))
 
-    # img_wrapped_stratified = cv2.resize(img_wrapped_stratified, None, fx = 1/ resize, fy = 1 / resize,interpolation = cv2.INTER_NEAREST)
+    # corners = [ul_Corner, ur_Corner, lr_Corner, ll_Corner]
+    corners = np.array([[*x[0:2], 1] for x in corners])
+    corners = perspectiveCorrectCorners(corners, homo_fitPlane)
 
+    plt.title("The wrapped result of fitPLane with " + vp_method)
+    plt.imshow(img_wrapped_fitPlane)
+    for i in range(len(corners)):
+        plt.plot([corners[i][0], corners[(i + 1) % 4][0]], [corners[i][1], corners[(i + 1) % 4][1]], 'b')
 
-    cv2.imshow("The wrapped result of fitPLane with " + vp_method, img_wrapped_fitPlane)
-    cv2.imshow("The wrapped result of stratified with " + vp_method, img_wrapped_stratified)
-    cv2.imshow("The wrapped result of projection with " + vp_method, img_wrapped_projection)
-    cv2.imshow("The wrapped result of affine with " + vp_method, img_wrapped_affine)
-
-    cv2.waitKey(5)
-    # cv2.destroyAllWindows()
+    plt.show()
 
     return img_wrapped_fitPlane
+
+
 
 
 #For stratified rectification, affine matrix requires 2 parameters that are related to
@@ -671,15 +721,16 @@ def applyHomography(allignedImg, leftVP, rightVP, vp_method="posture"):
 #known ratios are necessary. For this, we will process the given trajectory lines and pick
 #paths that have constant velocity according to reporjection.
 
-#We also assume that no consecutive trajectory is parallel
+#We also assume that no consecutive trajectory is parallel and we take only positive B values
+#as negative values cause mirror effect on ground planes
 
 #The logic is adopted from "Ground Plane Rectification by Tracking Moving Objects"
-def extract_circular_points(trajectory_lines):
+def extract_circular_points(trajectory_lines, P):
 
     from matplotlib.patches import Circle
-    from matplotlib.collections import PatchCollection
 
     circles = []
+    intersections = set([])
 
     fig, ax = plt.subplots()
 
@@ -688,13 +739,24 @@ def extract_circular_points(trajectory_lines):
     #For every 2 line, calculate centre and radius of the circle using line endpoints
     for i in range(len(trajectory_lines[0]) // 2):
         line_1 = [[centers[i][0] - (directions[i][0] * strengths[i]),
-                        centers[i][0] + (directions[i][0] * strengths[i])],
+                        centers[i][0] + (directions[i][0] * strengths[i]),1],
                        [centers[i][1] - (directions[i][1] * strengths[i]),
-                        centers[i][1] + (directions[i][1] * strengths[i])]]
+                        centers[i][1] + (directions[i][1] * strengths[i]),1]]
         line_2 = [[centers[i+1][0] - (directions[i+1][0] * strengths[i+1]),
-                        centers[i+1][0] + (directions[i+1][0] * strengths[i+1])],
+                        centers[i+1][0] + (directions[i+1][0] * strengths[i+1]),1],
                        [centers[i+1][1] - (directions[i+1][1] * strengths[i+1]),
-                        centers[i+1][1] + (directions[i+1][1] * strengths[i+1])]]
+                        centers[i+1][1] + (directions[i+1][1] * strengths[i+1]),1]]
+
+
+        #Apply projection to lines
+        line_1 = np.array([np.dot(P, np.array(t).T) for t in line_1])
+        line_1[0] = line_1[0] / line_1[0][2]
+        line_1[1] = line_1[1] / line_1[1][2]
+
+
+        line_2 = np.array([np.dot(P, np.array(t).T) for t in line_2])
+        line_2[0] = line_2[0] / line_2[0][2]
+        line_2[1] = line_2[1] / line_2[1][2]
 
         #Assume length ratio of the trajectories are 1 in the world plane
         s = 1
@@ -706,20 +768,45 @@ def extract_circular_points(trajectory_lines):
                            / (pow(delta_y1,2) - pow((s * delta_y2),2)), 0)
         radius = np.abs(s * (delta_x2 * delta_y1 - delta_x1 * delta_y2) / (pow(delta_y1 , 2) - pow((s * delta_y2) , 2)))
 
+
+        #For every circle found, find its intersection with every other circle
+        #Formula: http://mathworld.wolfram.com/Circle-CircleIntersection.html
+        for circle in circles: # The "circle" here shadows the one above
+            d = circle.center[0] - c_alpha
+            r = circle.radius
+            intersection_x = c_alpha + (pow(d,2) - pow(r,2) + pow(radius,2)) \
+                             / (2 * d)
+            intersection_y = np.sqrt((r - radius - d) * (- d - r + radius) * (-d + r + radius) * (d + r + radius)) / (2*d)
+
+            if not math.isnan(intersection_y): # If there is intersection
+                intersections.add((intersection_x,abs(intersection_y)))
+                # intersections.add((intersection_x, -intersection_y)) Negative value is unused
+
+                # Draw the intersection points
+                ax.plot([intersection_x], [intersection_y], 'ro')
+                ax.plot([intersection_x], [-intersection_y], 'ro')
+
+        # Add the circle to the list
         circle = Circle((c_alpha, c_beta), radius, color = 'b', fill=False)
         circles.append(circle)
 
         ax = plt.gca()
         ax.add_patch(circle)
 
-    # Find the intersection of circles for each pair, then find their mean
+    mean_intersection = intersections
+    #Find and plot the mean of the intersection points
+    if len(intersections) > 1:
+        mean_intersection = np.mean(list(intersections), axis = 0)
+
+    if len(intersections) > 0:
+        ax.plot(mean_intersection[0], mean_intersection[1], 'bo')
 
     plt.axis('scaled')
     plt.show()
 
+    return intersections, mean_intersection
 
-
-def compute_homography_and_warp(image, vp1, vp2, clip=True, clip_factor=3):
+def compute_homography_and_warp(image, vp1, vp2, trajectories, clip=True, clip_factor=3, method="posture"):
     """Compute homography from vanishing points and warp the image.
 
     It is assumed that vp1 and vp2 correspond to horizontal and vertical
@@ -749,28 +836,56 @@ def compute_homography_and_warp(image, vp1, vp2, clip=True, clip_factor=3):
         Image warped using homography as described above.
     """
 
+    height,width,_ = image.shape
+    ll_Corner = [0,height]
+    lr_Corner = [width, height]
+    ul_Corner = [0,0]
+    ur_Corner = [width, 0]
+
     # Find Projective Transform
     vanishing_line = np.cross(vp1, vp2)
     H = np.eye(3)
     H[2] = vanishing_line / vanishing_line[2]
     H = H / H[2, 2] #As h32 needs to be 1 in projection
 
+    # Determine a and b for the affine component of the homography
+    intersections, mean_intersection = extract_circular_points(trajectories, H)
+
+    A = np.eye(3, 3)
+    a = np.nan; b = np.nan
+
+    if len(mean_intersection) > 0:
+        a = mean_intersection[0]
+        b = mean_intersection[1]
+
+        A[0, 0] = 1 / b
+        A[0, 1] = -a / b
+
+    H = np.dot(A, H)
+
     # Find directions corresponding to vanishing points
-    v_post1 = np.dot(H, vp1) #The last element it 0 as it is the distance of the vanishing line to a vanishing point
+    v_post1 = np.dot(H, vp1) #Direction is found by multiplying with the projection matrix
     v_post2 = np.dot(H, vp2)
+
+    #Normalize
     v_post1 = v_post1 / np.sqrt(v_post1[0]**2 + v_post1[1]**2)
     v_post2 = v_post2 / np.sqrt(v_post2[0]**2 + v_post2[1]**2)
 
+    # X and Y parts of the directions are used to find the angle it makes with
+
+    #Arctan is used to find the small angle with the mentioned axis, having X at top gives result according to Y axis
     directions = np.array([[v_post1[0], -v_post1[0], v_post2[0], -v_post2[0]],
                            [v_post1[1], -v_post1[1], v_post2[1], -v_post2[1]]])
 
+    # TODO: Change 0 ad 1 to find it according to Y axis
+    #Finds the angle it makes with the horizon
     thetas = np.arctan2(directions[0], directions[1])
 
-    # Find direction closest to horizontal axis
+    # Find the index for
     h_ind = np.argmin(np.abs(thetas))
 
-    # Find positve angle among the rest for the vertical axis
-    if h_ind // 2 == 0:
+    # Find positive angle among the rest for the vertical axis
+    if h_ind // 2 == 0:# If the angle is positive
         v_ind = 2 + np.argmax([thetas[2], thetas[3]])
     else:
         v_ind = np.argmax([thetas[2], thetas[3]])
@@ -823,11 +938,18 @@ def compute_homography_and_warp(image, vp1, vp2, clip=True, clip_factor=3):
     warped_img = transform.warp(image, np.linalg.inv(final_homography),
                                 output_shape=(max_y, max_x))
 
-    cv2.imshow("The warped result from google", warped_img)
-    cv2.waitKey(0)
 
+    corners = [ul_Corner, ur_Corner, lr_Corner, ll_Corner]
+    corners = transform.matrix_transform(corners, final_homography)
 
-    return warped_img
+    plt.title("The warped result from google " + method)
+    plt.imshow(warped_img)
+    for i in range(len(corners)):
+        plt.plot([corners[i][0], corners[(i + 1) % 4][0]], [corners[i][1], corners[(i + 1) % 4][1]], 'b')
+
+    plt.show()
+
+    return warped_img, corners
 
 class CameraParameterWriter:
 
@@ -838,11 +960,14 @@ class CameraParameterWriter:
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.writer.close()
 
+# TODO: Comment and explain
 def extractCameraParameters(image, model_points, image_points, K):
 
+    #TODO: DEBUG
     h,w,_ = image.shape
 
     #For displaying the axes of the placed model
+    model_points = np.array([[*x,0] for x in model_points])
     model_normal = np.float64([[0, 0, 0], [10, 0, 0], [0, 10, 0], [0, 0, 20]])
 
     rvec = np.zeros((3, 1))
@@ -854,7 +979,8 @@ def extractCameraParameters(image, model_points, image_points, K):
     camWriter = CameraParameterWriter()
 
     #From experiments, p3p seems like the best
-    algorithms = { "iterative": cv2.SOLVEPNP_ITERATIVE, "p3p": cv2.SOLVEPNP_P3P, "epnp": cv2.SOLVEPNP_EPNP}
+    # algorithms = { "iterative": cv2.SOLVEPNP_ITERATIVE, "p3p": cv2.SOLVEPNP_P3P, "epnp": cv2.SOLVEPNP_EPNP}
+    algorithms = { "p3p": cv2.SOLVEPNP_P3P}
 
     for v,k in enumerate(algorithms):
 
@@ -875,7 +1001,7 @@ def extractCameraParameters(image, model_points, image_points, K):
         print("Translation {}".format(tvec))
 
         # Display image
-        cv2.imshow("Output", image)
+        cv2.imshow("Output of algorithm " + k, image)
         cv2.waitKey(0)
 
         #Intrinsic Line
@@ -885,19 +1011,15 @@ def extractCameraParameters(image, model_points, image_points, K):
         tvec = [t[0] for t in tvec]
         camWriter.write("{} {} {} {} {} {} {} {} {} {} {} {}\n".format(*(rvec[:,0]),*(rvec[:,1]),*(rvec[:,2]),*tvec))
 
-
-
-
-
-def rectify_groundPlane(image_OI, segmented_img_path, navigable_img_path, detection_data_file):
+#Main method that is used to rectify the ground plane
+def rectify_groundPlane(image_path, segmented_img_path, navigable_img_path, detection_data_file):
 
     # Manuel testing debugging part:
-    image = cv2.imread(image_OI)
+    image = cv2.imread(image_path)
     segmented_img = cv2.imread(segmented_img_path)
     navigable_img = cv2.imread(navigable_img_path)
 
     cv2.imshow("Image to be corrected", image)
-    cv2.imshow("The navigable area", navigable_img)
     cv2.waitKey(5)
 
     # Extract the lines from the navigable area only!
@@ -907,15 +1029,12 @@ def rectify_groundPlane(image_OI, segmented_img_path, navigable_img_path, detect
 
     #Obtain the postures of the pedestrian as lines too, to find the VP
     pedestrian_posture_paths, pedestrian_postures = parse_pedestrian_detection(np.copy(image), detection_data_file, 50, use_bounding_boxes=False, returnPosture= True)
-    pedestrian_posture_paths_single, _ = parse_pedestrian_detection(np.copy(image), detection_data_file, 10, use_bounding_boxes=False, tracker_id=56) # Parameter
+    pedestrian_posture_paths_single, _ = parse_pedestrian_detection(np.copy(image), detection_data_file, 10, use_bounding_boxes=False, tracker_id=[56]) # Parameter
 
     #If we assume the people doesn't change their velocities much
     #and calculate a homography between a path with multiple detections and
     pedestrian_bb_paths, _ = parse_pedestrian_detection(np.copy(image), detection_data_file, 10)
-    trajectory_lines, _ = parse_pedestrian_detection(np.copy(image), detection_data_file, 5, False, True, tracker_id=56) # Parameter
-
-    #Determine a and b for the affine component of the homography
-    extract_circular_points(trajectory_lines)
+    trajectory_lines, _ = parse_pedestrian_detection(np.copy(image), detection_data_file, 5, False, True, tracker_id=[56,17,10]) # Parameter
 
     # - Postures as both feet and head trajectories (too sensitive to noise, not preferable)
     # - Single tracker posture (better than above)
@@ -925,13 +1044,15 @@ def rectify_groundPlane(image_OI, segmented_img_path, navigable_img_path, detect
     # - Hough Lines from navigable area only
 
     vp_determination_methods = {
-        'posture': [pedestrian_posture_paths, False],
-        'single': [pedestrian_posture_paths_single, False],
-        'bb': [pedestrian_bb_paths, False],
-        'hough': [image_lines, True],
-        'trajectory': [trajectory_lines, True],
+        # 'posture': [pedestrian_posture_paths, False],
+        # 'single': [pedestrian_posture_paths_single, False],
+        # 'bb': [pedestrian_bb_paths, False],
+        # 'hough': [image_lines, True],
+        # 'trajectory': [trajectory_lines, True],
         'trajectory_hough': [[np.concatenate((trajectory_lines[j], image_lines[j]), axis=0)
-                              for j in range(3)] , True]
+                              for j in range(3)] , True],
+        'postures_hough': [[np.concatenate((pedestrian_posture_paths[j], image_lines[j]), axis=0)
+                              for j in range(3)], True]
     }
 
     row = 3
@@ -943,81 +1064,65 @@ def rectify_groundPlane(image_OI, segmented_img_path, navigable_img_path, detect
     for i, k in enumerate(vp_determination_methods):
         lines = vp_determination_methods[k][0]
 
-        plot_axis = axis[i//col,i%col]
+        plot_axis = axis[i//col, i % col]
         # plot_axis.figure()
         plot_axis.set_title(str(k))
         plot_axis.imshow(image)
         horizon = determineVP(lines, np.copy(image), plot_axis= plot_axis, asTrajectory=vp_determination_methods[k][1])
 
         leftVP, rightVP = horizon
-        allignedImg, leftVP, rightVP = allignHorizon(image, horizon)
-        img_wrapped_segmented = applyHomography(image, list(leftVP), list(rightVP), k)
+
+        #Stratified approach
+        # img_stratified, model_corners = applyStratifiedHomography(image, list(leftVP), list(rightVP), trajectory_lines, k)
+        #
+        # #Google's method, which ignore affine transform and rotates according to Y axis (wall planes)
+        google_result, model_points = compute_homography_and_warp(image, list(leftVP), list(rightVP), trajectory_lines, clip=True, clip_factor=3, method=k)
+
+        # My method using imaginary plane which utilizes 4 point approach
+        # TODO: ABONDEN
+        # allignedImg, leftVP, rightVP, alligned_corners = allignHorizon(image, horizon)
+        # img_imgPlane = applyParametretizedHomography(allignedImg, list(leftVP), list(rightVP), alligned_corners, k)
 
         print("Method: {}, left: {}, right: {}".format(k,leftVP,rightVP))
 
-
-        #TODO: Google's method - left for comparison
-        # google_result = compute_homography_and_warp(image, list(leftVP), list(rightVP), clip=True, clip_factor=3)
-        # cv2.imshow("Google's result with " + k, google_result)
-        # cv2.waitKey(5)
-
         #Find the focal_unity length from the triangle of vanishing points
-
         pedestrian_postures = [np.concatenate((pedestrian_postures[j], image_lines[j]), axis=0)
          for j in range(3)]
         zenith_vp, focal_length = ransac_zenith_vp(pedestrian_postures, horizon, [width/2,height/2, 1])
-
         zenith_vp = zenith_vp / zenith_vp[2]
         plt.imshow(image)
-        plt.plot((zenith_vp[0]), (zenith_vp[1]), 'bo')
+        plt.plot((zenith_vp[0]), (zenith_vp[1]), 'ro')
         plt.show()
 
-        #TODO: Output the internal and external parameters through a text file
+        #Using the p3p methods, map the model points to image points
+
+        image_points = np.array([[0, height],[width, height],[0,0],[width,0]])
+
+        #TODO: Add 0's to
+        K = np.array([[focal_length,0,width/2],
+                     [0,focal_length,height/2],
+                     [0,0,1]])
+
+        #utput the internal and external parameters through a text file
+        extractCameraParameters(image, model_points, image_points, K)
 
         #Ezio Malis, Manuel Vargas, and others. Deeper understanding of the homography decomposition for vision-based control. 2007.
 
-
-
-
     plt.show()
 
-    # # img_wrapped_segmented = applyHomography(allignedImg, leftVP, rightVP)
-    # # cv2.imwrite("segmented_birdview.jpg", img_wrapped_segmented)
-    #
-    # img_wrapped = applyHomography(image, leftVP, rightVP)
-    # # cv2.imwrite("birdview.jpg", img_wrapped)
-
-
-# #TODO: Relook at that bin based papers.
-# '''
-# The edges needs to be clustered before they are used for finding vanishing points in the image
-# Each edge preserves an angle that is used to identify which VP it would contribute its calculation to.
-#
-# For example: edges that have degrees between 0-60 and 180-240 will contribute to right VP where
-# edges that have  60-120 and its reflection will contribute to zenith (3rd) VP.
-#
-# '''
-# def cluster_edges(edges, angle_range = 60):
-#
-#     locations, directions, strengths = edges
-#     clusters = [[],[],[]] #each for a VP
-#
-#     for p0, p1, i in enumerate(directions):
-#
-#         #Calculate the angle of the direction
-#         ang = np.arctan(p1,p0)
-#
-#         clusters[(ang % 180) // angle_range].append(i)
-
+# TODO:
+# - Modify plt plots (everything should be same type) so horizon images can be seen throughout all program
+# - Add the camera params code (test)
+# - OOP revision and DONE
 if __name__ == "__main__":
     print("Welcome to the perspective corrector")
 
     aparser = argparse.ArgumentParser(description="Using the image perspective cues and pedestrian detection data"
                                                   "in order to rectify the ground plane to be used for navigation")
-    aparser.add_argument("--image", help = "Image to be perspectively corrected")
-    aparser.add_argument("--segmented", help = "Segmented version of the given image")
-    aparser.add_argument("--detection", help = "Detection txt to be used")
-    # aparser.add_argument("--navColor", help = "The colored image with navigable area only") TODO: UNUSED
+    aparser.add_argument("--image_path", help = "Image to be perspectively corrected")
+    aparser.add_argument("--segmented_img_path", help = "Segmented version of the given image")
+    aparser.add_argument("--detection_data_file", help = "Detection txt to be used")
+    aparser.add_argument("--navigable_img_path", help = "The colored image with navigable area only") #TODO: UNUSED
 
     args = vars(aparser.parse_args())
 
