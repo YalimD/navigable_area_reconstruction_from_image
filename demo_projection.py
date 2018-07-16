@@ -56,7 +56,7 @@ class CameraParameterWriter:
 if __name__ == '__main__':
 
     #Read original and birdview images
-    org = cv2.imread("./unityTest_2.jpg")
+    org = cv2.imread("./unityTest_3.jpg")
 
     h,w = org.shape[:2]
 
@@ -100,42 +100,52 @@ if __name__ == '__main__':
         [0,0,1]
     ])
 
-    # #Quad 3d is the area where the model's base should be located in the image (From top)
-    # model = np.float64([[-10, 0, 0], [10, 0, 0], [25, 60, 0], [-25, 60, 0]])
-    # #This is what is seen on the image (From perspective)
-    # wrapped_3d = np.float64([[[115, 495]], [[827,495]], [[636,307]], [[312, 307]]])
-
     #Quad 3d is the area where the model's base should be located in the image (From top)
-    model = np.float64([[-10, 0, 0], [10, 0, 0], [10, 20, 0], [-10, 20, 0]])
-    model_normal = np.float64([[0,0,0],[10,0,0],[0,10,0],[0,0,20]])
+
+    # model_normal = np.float64([[0,0,0],[10,0,0],[0,10,0],[0,0,-10]])
     #This is what is seen on the image (From perspective)
-    wrapped_3d = np.float64([[[320, 422]], [[628,423]], [[627,111]], [[318, 111]]])
+    # wrapped_3d = np.float64([[[320, 422]], [[628,423]], [[627,111]], [[318, 111]], [[w/2,h/2]]])
+    wrapped_3d = np.float64([[[131, 299]], [[437,297]], [[365,229]], [[261, 231]], [[291,261]]])
 
+    resize = 1
+    # model = np.multiply(np.float64([[-10, 0, 0], [10, 0, 0], [10, 20, 0], [-10, 20, 0], [0,10,0]]),resize)
+    model = np.multiply(np.float64([[320, h - 420,0], [628, h -423,0], [627, h -111,0], [318, h -111,0], [w // 2, h - h // 2,0]]),
+                        resize)
+    # model = np.multiply(np.float64([[131,h- 299,0], [437,h-297,0], [365,h-229,0], [261,h-231,0], [291,h-261,0]]),resize)
 
-
-def extractCameraParameters(modelPoints, imagePoints, K):
     rvec = np.zeros((3, 1))
     tvec = np.zeros((3, 1))
 
     dist_coef = np.zeros(4)
 
-    # TODO: Write these results to an output file
+    #Write the results to an output file
     camWriter = CameraParameterWriter()
 
     #From experiments, p3p seems like the best
-    algorithms = { "iterative": cv2.SOLVEPNP_ITERATIVE, "p3p": cv2.SOLVEPNP_P3P, "epnp": cv2.SOLVEPNP_EPNP}
+    algorithms = { "iterative": cv2.SOLVEPNP_ITERATIVE, "p3p": cv2.SOLVEPNP_P3P}
 
     for v,k in enumerate(algorithms):
 
-        _ret, rvec, tvec = cv2.solvePnP(model, wrapped_3d, K, dist_coef, flags=v)
+        if k == "iterative":
+            _ret, rvec, tvec = cv2.solvePnP(model, wrapped_3d, K, dist_coef, flags=v)
 
-        (normal, _) = cv2.projectPoints(model_normal, rvec,
-                                                        tvec,
-                                                         K, dist_coef)
+            for iteration in range(100):
+                _ret, rvec, tvec = cv2.solvePnP(model, wrapped_3d, K, dist_coef, rvec, tvec,useExtrinsicGuess = True,flags=v)
 
-        cv2.line(org, tuple(map(int,normal[0][0])), tuple(map(int,normal[1][0])), (0, 0, 255), 2)
-        cv2.line(org, tuple(map(int, normal[0][0])), tuple(map(int, normal[2][0])), (0, 255, 0), 2)
-        cv2.line(org, tuple(map(int, normal[0][0])), tuple(map(int, normal[3][0])), (255, 0, 0), 2)
+
+        for center in model:
+
+            center_offset = 50 * resize
+            model_normal = np.float64([center, np.add([center_offset, 0, 0], center),
+                                       np.add([0, center_offset, 0], center), np.add([0, 0, center_offset], center)])
+
+            (normal, _) = cv2.projectPoints(model_normal, rvec,
+                                                            tvec,
+                                                             K, dist_coef)
+
+            cv2.line(org, tuple(map(int,normal[0][0])), tuple(map(int,normal[1][0])), (0, 0, 255), 2)
+            cv2.line(org, tuple(map(int, normal[0][0])), tuple(map(int, normal[2][0])), (0, 255, 0), 2)
+            cv2.line(org, tuple(map(int, normal[0][0])), tuple(map(int, normal[3][0])), (255, 0, 0), 2)
 
         rvec, _ = cv2.Rodrigues(rvec)
 
