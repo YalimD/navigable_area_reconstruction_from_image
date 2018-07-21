@@ -874,10 +874,16 @@ def compute_homography_and_warp(image, vp1, vp2, trajectories, corners, clip=Tru
 
     final_homography = np.dot(T, inter_matrix)
 
+    S = np.array([[width / max_x , 0 ,0],
+                 [0, height / max_y, 0],
+                 [0 , 0 ,1]])
+
+    final_homography = np.dot(S, final_homography)
+
     # final_homography = np.eye(3)
 
     warped_img = transform.warp(image, np.linalg.inv(final_homography),
-                                output_shape=(max_y, max_x))
+                                output_shape=(height, width))
 
 
     transformed_corners = transform.matrix_transform(corners, final_homography)
@@ -934,7 +940,6 @@ def mouse_handler(event, x, y, flags, data):
 # TODO: Comment and explain
 def extractCameraParameters(image, warped_img, model_points, image_points, K_warped, H = None):
 
-    #TODO: DEBUG
     h_org,w_org,_ = image.shape
     h_warped, w_warped, _ = warped_img.shape
 
@@ -944,24 +949,6 @@ def extractCameraParameters(image, warped_img, model_points, image_points, K_war
     #TODO: There should be a single cam writer for all program
     camWriter = CameraParameterWriter()
 
-    # Decomposition part
-    _sol, rvec_sol, tvec_sol, nvec_sol = cv2.decomposeHomographyMat(np.linalg.inv(H), K_warped)
-    for i in range(_sol):
-
-        rvec = rvec_sol[i]; tvec = tvec_sol[i]; nvec = nvec_sol[i]
-
-        rvec, _ = cv2.Rodrigues(rvec)
-
-        print("-" * 100)
-        print("Rotation {}".format(rvec))
-        print("Translation {}".format(tvec))
-        print("Normals {}".format(nvec))
-
-    # For testing the H
-    plt.title("Top homoed to side")
-    top_to_side = cv2.warpPerspective(warped_img, np.linalg.inv(H), (image.shape[1], image.shape[0]))
-    plt.imshow(top_to_side)
-    plt.show()
 
     #For placing the top camera, use pnp method (p3p)
 
@@ -1013,6 +1000,29 @@ def extractCameraParameters(image, warped_img, model_points, image_points, K_war
     camWriter.write("{} {} {} {} {} {} {} {} {} {} {} {} {} {}\n".format(*(rvec_top[:,0]), *(rvec_top[:,1]),
                                                                          *(rvec_top[:,2]), *tvec_top,
                                                                          w_warped, h_warped))
+
+    # Adapt the decomposition placement
+    # Decomposition part
+    _sol, rvec_sol, tvec_sol, nvec_sol = cv2.decomposeHomographyMat(np.linalg.inv(H), K_warped)
+    for i in range(_sol):
+        rvec = rvec_sol[i];
+        tvec = tvec_sol[i];
+        nvec = nvec_sol[i]
+
+        rvec, _ = cv2.Rodrigues(rvec)
+
+        print("-" * 100)
+        print("Rotation {}".format(rvec))
+        print("Translation {}".format(tvec))
+        print("Normals {}".format(nvec))
+
+    # For testing the H
+    plt.title("Top homoed to side")
+    top_to_side = cv2.warpPerspective(warped_img, np.linalg.inv(H), (image.shape[1], image.shape[0]))
+    plt.imshow(top_to_side)
+    plt.show()
+
+
 
     # for solution in range(_sol):
     #
