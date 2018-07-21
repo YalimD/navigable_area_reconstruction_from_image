@@ -539,10 +539,12 @@ def allignHorizon(image, horizon):
 
         #Interpolation variable adjusts how lower the top line of the polygon to be used for homography
         #is going to be lower than horizon.
-        vpheight = 1 # Parameter
+        vpheight = 0.95 # Parameter
         leftP  = (int(horizonImgCen[0] * vpheight), int(horizonImgCen[1] * vpheight + leftCorner[1] * (1-vpheight)))
         rightP = (int(horizonImgCen[0] * vpheight + rightCorner[0] * (1 - vpheight)),
                   int(horizonImgCen[1] * vpheight + rightCorner[1] * (1 - vpheight)))
+
+
     else:
         leftP = np.cross(horizonImgCen,leftCorner)
         leftP = [-leftP[2] / leftP[0], 0]
@@ -574,24 +576,25 @@ def allignHorizon(image, horizon):
     # )
     # Create lines from both left and right of the image
     # Cross product on both to get the corresponding points
-    corners = [ul_Corner, ur_Corner, lr_Corner, ll_Corner]
+    corners = [ll_Corner, lr_Corner, ur_Corner, ul_Corner, [width//2, height//2]]
+    corners_homo = [[*corner,1] for corner in corners]
 
-    left_border = np.cross(corners[0],corners[3])
-    right_border = np.cross(corners[1],corners[2])
+    left_border = np.cross(corners_homo[0],corners_homo[3])
+    right_border = np.cross(corners_homo[1],corners_homo[2])
     right_border = right_border / right_border[2]
 
     horizon_line = np.cross(horizon[0],horizon[1])
 
-    corners[0] = np.cross(left_border, horizon_line)
-    corners[0] = corners[0] / corners[0][2]
-    corners[1] = np.cross(right_border, horizon_line)
-    corners[1] = corners[1] / corners[1][2]
+    corners_homo[0] = np.cross(left_border, horizon_line)
+    corners[3] = (corners_homo[0] / corners_homo[0][2])[:2]
+    corners_homo[1] = np.cross(right_border, horizon_line)
+    corners[2] = (corners_homo[1] / corners_homo[1][2])[:2]
 
     rot_homo = np.eye(3)
     rot_homo[0,:] = rot[0]
     rot_homo[1,:] = rot[1]
 
-    corners = perspectiveCorrectCorners(corners, rot_homo)
+    corners = transform.matrix_transform(corners, rot_homo)
 
     plt.title("The allign horizon result of fitPLane with " )
     for i in range(len(corners)):
@@ -601,71 +604,6 @@ def allignHorizon(image, horizon):
 
     return dst, [*leftP,1], [*rightP,1], corners
 
-#Apply the stratified method of homography to the image
-def applyStratifiedHomography(allignedImg, leftVP, rightVP, trajectories, vp_method="posture"):
-
-    height,width,_ = allignedImg.shape
-    ll_Corner = [0,height]
-    lr_Corner = [width, height]
-    ul_Corner = [0,0]
-    ur_Corner = [width, 0]
-
-    from skimage import transform
-
-    #Find the definition of the vanishing line as homogenous coordinates
-    horizon = np.cross(leftVP,rightVP)
-    # horizon = horizon / np.sqrt(horizon[0]**2 + horizon[1]**2)
-    horizon = horizon / horizon[2]
-    P = np.eye(3,3)
-
-    P[2,:] = horizon
-    P = P / P[2,2]
-
-    print("P:{} with left {} and right {}".format(P,leftVP,rightVP))
-
-    # img_wrapped_projection = transform.warp(allignedImg, np.linalg.inv(P),output_shape=(height * 3, width * 3),clip = False)
-
-    #Determine a and b for the affine component of the homography
-    intersections, mean_intersection = extract_circular_points(trajectories, P)
-
-    A = np.eye(3,3)
-    a = np.nan; b = np.nan
-
-    if len(mean_intersection) > 0:
-        a = mean_intersection[0]
-        b = mean_intersection[1]
-
-        A[0,0] = 1 / b
-        A[0,1] = -a / b
-
-    homo_stratified = np.dot(A, P)
-
-    # Translation is related to the horizon and bottom 2 points of the scene (it is assumed that the horizon is always
-    # over the central point of the camera as we are in birdview
-
-    T = np.array([[2,0,100],[0,2,100],[0,0,1]])
-    homo_stratified = np.dot(T,homo_stratified)
-
-
-    resize = 1 #As the resulting image is very big, it needs to be scaled down
-    from skimage.transform import ProjectiveTransform
-    img_wrapped_stratified = transform.warp(allignedImg, np.linalg.inv(homo_stratified),
-                                                output_shape=(int(height * resize),
-                                                 int(width * resize)
-                                                 ))
-
-    plt.title("Stratified image with method {} with a:{} and b:{} ".format(vp_method,a,b))
-    plt.imshow(img_wrapped_stratified)
-
-    corners = [ul_Corner, ur_Corner, lr_Corner, ll_Corner]
-    corners = transform.matrix_transform(corners, homo_stratified)
-
-    for i in range(len(corners)):
-        plt.plot([corners[i][0],corners[(i+1)%4][0]], [corners[i][1],corners[(i+1) % 4][1]], 'b')
-
-    plt.show()
-
-    return img_wrapped_stratified
 
 
 def applyParametretizedHomography(allignedImg, leftVP, rightVP, corners, vp_method="posture"):
@@ -694,16 +632,23 @@ def applyParametretizedHomography(allignedImg, leftVP, rightVP, corners, vp_meth
     ], np.float)
 
     homo_fitPlane, status = cv2.findHomography(homographyPlane, mappedPos)
-    # homo_fitPlane = np.eye(3)
+    homo_fitPlane = np.eye(3)
 
-    img_wrapped_fitPlane = cv2.warpPerspective(allignedImg, homo_fitPlane,
-                                                (allignedImg.shape[1],
-                                                 allignedImg.shape[0]
-                                                 ))
+    img_wrapped_fitPlane = transform.warp(allignedImg, np.linalg.inv(homo_fitPlane),
+                                output_shape=(allignedImg.shape[1],
+                                                 allignedImg.shape[0]))
 
-    # corners = [ul_Corner, ur_Corner, lr_Corner, ll_Corner]
-    corners = np.array([[*x[0:2], 1] for x in corners])
-    corners = perspectiveCorrectCorners(corners, homo_fitPlane)
+    corners = transform.matrix_transform(corners, homo_fitPlane)
+
+    # # TODO: DELETE
+    # # If the top corners are below the bottom corners (result of extreme rectification cases)
+    # # mirror them according to y axis represented by bottom corners
+    # print("Before {}".format(corners))
+    # if corners[2][1] > corners[1][1]:
+    #     corners[2] = np.subtract(corners[1], np.subtract(corners[2], corners[1]))
+    # if corners[3][1] > corners[0][1]:
+    #     corners[3] = np.subtract(corners[0], np.subtract(corners[3], corners[0]))
+    # print("After {}".format(corners))
 
     plt.title("The wrapped result of fitPLane with " + vp_method)
     plt.imshow(img_wrapped_fitPlane)
@@ -712,10 +657,9 @@ def applyParametretizedHomography(allignedImg, leftVP, rightVP, corners, vp_meth
 
     plt.show()
 
-    return img_wrapped_fitPlane
+    plt.imsave("warped_result.png", img_wrapped_fitPlane)
 
-
-
+    return img_wrapped_fitPlane, corners, homo_fitPlane
 
 #For stratified rectification, affine matrix requires 2 parameters that are related to
 #the circular points that lie on the absolute conic. In order to obtain them, lines with
@@ -938,7 +882,8 @@ def compute_homography_and_warp(image, vp1, vp2, trajectories, corners, clip=Tru
 
     transformed_corners = transform.matrix_transform(corners, final_homography)
     print(transformed_corners)
-    plt.title("The warped result from google " + method)
+    plt.clf()
+    plt.title("The warped result from google {} a:{} b:{}".format(method, a, b))
     plt.imshow(warped_img)
 
     for i in range(len(transformed_corners)):
@@ -947,7 +892,8 @@ def compute_homography_and_warp(image, vp1, vp2, trajectories, corners, clip=Tru
 
     plt.show()
 
-
+    # OpenCV cannot save the image file properly
+    plt.imsave("warped_result.png",warped_img)
 
     return warped_img, transformed_corners, final_homography
 
@@ -960,17 +906,57 @@ class CameraParameterWriter:
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.writer.close()
 
+def get_four_points(im):
+
+    # Set up data to send to mouse handler
+    data = {}
+    data['im'] = im.copy()
+    data['points'] = []
+
+    # Set the callback function for any mouse event
+    cv2.imshow("Image", im)
+    cv2.setMouseCallback("Image", mouse_handler, data)
+    cv2.waitKey(0)
+
+    # Convert array to np.array
+    points = np.vstack(data['points']).astype(float)
+
+    return points
+
+
+def mouse_handler(event, x, y, flags, data):
+    if event == cv2.EVENT_LBUTTONDOWN:
+        cv2.circle(data['im'], (x, y), 3, (0, 0, 255), 5, 16);
+        cv2.imshow("Image", data['im']);
+        if len(data['points']) < 10:
+            data['points'].append([x, y])
+
 # TODO: Comment and explain
-def extractCameraParameters(image, model_points, image_points, K, H = None):
+def extractCameraParameters(image, warped_img, model_points, image_points, K, H = None):
 
     #TODO: DEBUG
-    h,w,_ = image.shape
+    h_org,w_org,_ = image.shape
+    h_warped, w_warped, _ = warped_img.shape
+
     clean_img = np.copy(image)
 
     #For displaying the axes of the placed model
     #On model, the lower right corner will be considered as the axis
     #The Y coordinate needs to be reversed as in Unity, y (z) is forward
-    model_points = np.float64([[x[0], h - x[1], 0] for x in model_points])    #TODO: To be deleted, for identifying axes
+
+    image_points = get_four_points(image)
+    model_points = transform.matrix_transform(image_points, H)
+
+    plt.imshow(warped_img)
+
+    for i in range(len(model_points)):
+        plt.plot([model_points[i][0], model_points[(i + 1) % len(model_points)][0]],
+                 [model_points[i][1], model_points[(i + 1) % len(model_points)][1]], 'b')
+
+    plt.show()
+
+    model_points = np.float64([[x[0], x[1] - h_warped, 0] for x in model_points])
+
     image_points = np.float64([[x] for x in image_points])
 
     rvec = np.zeros((3, 1))
@@ -979,18 +965,25 @@ def extractCameraParameters(image, model_points, image_points, K, H = None):
     dist_coef = np.zeros(4)
 
     #For writing these results to an output file
+    #TODO: There should be a single cam writer for all program
     camWriter = CameraParameterWriter()
 
     #From experiments, p3p seems like the best
-    algorithms = {"decomp": -1} #, "epnp": cv2.SOLVEPNP_EPNP}
-    algorithms = {"iterative": cv2.SOLVEPNP_ITERATIVE, "p3p": cv2.SOLVEPNP_P3P} #, "epnp": cv2.SOLVEPNP_EPNP}
+    algorithms = {"p3p": cv2.SOLVEPNP_P3P} #, "iterative": cv2.SOLVEPNP_ITERATIVE, "decomp": -1} #, "epnp": cv2.SOLVEPNP_EPNP}
+    # algorithms = { "decomp": -1}
 
     for v,k in enumerate(algorithms):
 
-        if k == "decomp": #TODO: Decomposition version
+        if k == "decomp": #Decomposition version
             _sol, rvec_sol, tvec_sol, nor_sol = cv2.decomposeHomographyMat(np.linalg.inv(H), K)
-        else:
+
+        else:# Pnp versions
             _ret, rvec, tvec = cv2.solvePnP(model_points, image_points, K, dist_coef, flags=v)
+            if k == "iterative":
+                for iteration in range(100):
+                    _ret, rvec, tvec = cv2.solvePnP(model_points, image_points, K, dist_coef, rvec, tvec,
+                                                    useExtrinsicGuess=True,
+                                                    flags=v)
             _sol = 1
 
         for solution in range(_sol):
@@ -998,112 +991,97 @@ def extractCameraParameters(image, model_points, image_points, K, H = None):
             if k == "decomp":
                 rvec = rvec_sol[solution]
                 tvec = tvec_sol[solution]
+                nvec = nor_sol[solution]
+
+
+            plt.title("The solution no:" + str(solution))
+            plt.imshow(clean_img)
+            col = "rgb"
 
             for center in model_points:
 
                 center_offset = 100
                 model_normal = np.float64([center, np.add([center_offset, 0, 0], center),
                                            np.add([0, center_offset, 0], center), np.add([0, 0, center_offset], center)])
-
-
-
-                #TODO: FOR DEBUGGING ONLY: If decomp, project points according to perpendicular camera as it adds distortion
-                if k == "decomp":
-                    image_points = np.float64([[x[0], h - x[1]] for x in model_points])
-
-                    _, d_rvec, d_tvec = cv2.solvePnP(model_points, image_points, K, dist_coef, flags=v)
-
-                    (model_normal, _) = cv2.projectPoints(model_normal, d_rvec,
-                                                    d_tvec,
-                                                    K, dist_coef)
-
-                    # warped_img = transform.warp(image, np.linalg.inv(H))
                     #
-                    # cv2.line(warped_img, tuple(map(int, model_normal[0][0])), tuple(map(int,model_normal[1][0])), (0, 0, 255), 2)
-                    # cv2.line(warped_img, tuple(map(int, model_normal[0][0])), tuple(map(int, model_normal[2][0])), (0, 255, 0), 2)
-                    # cv2.line(warped_img, tuple(map(int, model_normal[0][0])), tuple(map(int, model_normal[3][0])), (255, 0, 0), 2)
+                    # #TODO: FOR DEBUGGING ONLY: If decomp, project points according to perpendicular camera as it adds distortion
+                    # if k == "decomp":
+                    #     image_points = np.float64([[x[0], h_warped - x[1]] for x in model_points])
                     #
-                    # cv2.imshow("W",warped_img)
-                    # cv2.waitKey(0)
+                    #     _, d_rvec, d_tvec = cv2.solvePnP(model_points, image_points, K, dist_coef, flags=cv2.SOLVEPNP_ITERATIVE)
+                    #
+                    #     (model_normal, _) = cv2.projectPoints(model_normal, d_rvec,
+                    #                                     d_tvec,
+                    #                                     K, dist_coef)
+                    #
+                    #     # warped_img = transform.warp(image, np.linalg.inv(H))
+                    #     #
+                    #     # cv2.line(warped_img, tuple(map(int, model_normal[0][0])), tuple(map(int,model_normal[1][0])), (0, 0, 255), 2)
+                    #     # cv2.line(warped_img, tuple(map(int, model_normal[0][0])), tuple(map(int, model_normal[2][0])), (0, 255, 0), 2)
+                    #     # cv2.line(warped_img, tuple(map(int, model_normal[0][0])), tuple(map(int, model_normal[3][0])), (255, 0, 0), 2)
+                    #     #
+                    #     # cv2.imshow("W",warped_img)
+                    #     # cv2.waitKey(0)
+                    #
+                    #     model_normal = [x[0] for x in model_normal]
+                    #
+                    #     normal = transform.matrix_transform(model_normal, np.linalg.inv(H))
+                    #     normal = model_normal
+                    #
+                    #     cv2.line(warped_img, tuple(map(int, normal[0])), tuple(map(int, normal[1])), (0, 0, 255), 2)
+                    #     cv2.line(warped_img, tuple(map(int, normal[0])), tuple(map(int, normal[2])), (0, 255, 0), 2)
+                    #     cv2.line(warped_img, tuple(map(int, normal[0])), tuple(map(int, normal[3])), (255, 0, 0), 2)
+                    #
+                    #     center = [0,0,0]
+                    #     model_normal = np.float64([center, np.add([center_offset, 0, 0], center),
+                    #                                np.add([0, center_offset, 0], center),
+                    #                                np.add([0, 0, center_offset], center)])
 
-                    model_normal = [x[0] for x in model_normal]
+                (normal, _) = cv2.projectPoints(model_normal, rvec,
+                                                            tvec,
+                                                            K, dist_coef)
 
-                    normal = transform.matrix_transform(model_normal, np.linalg.inv(H))
+                normal = [x[0] for x in normal]
 
-                    cv2.line(image, tuple(map(int, normal[0])), tuple(map(int,normal[1])), (0, 0, 255), 2)
-                    cv2.line(image, tuple(map(int, normal[0])), tuple(map(int, normal[2])), (0, 255, 0), 2)
-                    cv2.line(image, tuple(map(int, normal[0])), tuple(map(int, normal[3])), (255, 0, 0), 2)
+                for i in range(len(normal) - 1):
+                    plt.plot([normal[0][0], normal[i + 1][0]], [normal[0][1], normal[i + 1][1]], col[i])
 
-
-                    center = [0,0,0]
-                    model_normal = np.float64([center, np.add([center_offset, 0, 0], center),
-                                               np.add([0, center_offset, 0], center),
-                                               np.add([0, 0, center_offset], center)])
-
-                    (normal, _) = cv2.projectPoints(model_normal, rvec,
-                                                                  tvec,
-                                                                  K, dist_coef)
-
-                    normal = [x[0] for x in normal]
-
-                    plt.title("The solution no:" + str(solution))
-                    plt.imshow(clean_img)
-                    col = "rgb"
-                    for i in range(len(normal) - 1):
-                        plt.plot([normal[0][0], normal[i+1][0]],[normal[0][1], normal[i+1][1]] , col[i])
-
-                    plt.show()
-
-                else:
-                    (normal, _) = cv2.projectPoints(model_normal, rvec,
-                                                                  tvec,
-                                                                  K, dist_coef)
-
-                    normal = [x[0] for x in normal]
-
-                    plt.title("The solution no:" + str(solution))
-                    plt.imshow(clean_img)
-                    col = "rgb"
-                    for i in range(len(normal) - 1):
-                        plt.plot([normal[0][0], normal[i + 1][0]], [normal[0][1], normal[i + 1][1]], col[i])
-
-                    plt.show()
-
+            plt.show()
 
             if k != "decomp":
                 rvec, _ = cv2.Rodrigues(rvec)
 
+            #As the pnp gives us the object translation, we need to get the camera translation by transposing
+            rvec = np.transpose(rvec)
+            tvec = np.dot(-rvec, tvec)
             print(k)
             print("Rotation {}".format(rvec))
             print("Translation {}".format(tvec))
 
-            # Display image
-            cv2.imshow("Output of algorithm " + k, image)
-            cv2.waitKey(0)
-            cv2.destroyAllWindows()
+            if k == "decomp":
+                print("Normal {}".format(nvec))
 
             image = np.copy(clean_img)
 
             #Intrinsic Line
-            camWriter.write("{} {} {} {} {} {}\n".format(w,h,K[0][2], K[1][2], K[0][0],K[1][1]))
+            camWriter.write("{} {} {} {} {} {}\n".format(w_org,h_org,K[0][2], K[1][2], K[0][0],K[1][1]))
 
             #Extrinsic Line
             tvec = [t[0] for t in tvec]
-            camWriter.write("{} {} {} {} {} {} {} {} {} {} {} {}\n".format(*(rvec[:,0]),*(rvec[:,1]),*(rvec[:,2]),*tvec))
+            camWriter.write("{} {} {} {} {} {} {} {} {} {} {} {} {} {}\n".format(*(rvec[:,0]),*(rvec[:,1]),*(rvec[:,2]),*tvec, w_warped, h_warped))
 
 #Main method that is used to rectify the ground plane
-def rectify_groundPlane(image_path, segmented_img_path, navigable_img_path, detection_data_file):
+def rectify_groundPlane(image_path, segmented_img_path, detection_data_file):
 
     # Manuel testing debugging part:
     image = cv2.imread(image_path)
     segmented_img = cv2.imread(segmented_img_path)
-    navigable_img = cv2.imread(navigable_img_path)
 
     cv2.imshow("Image to be corrected", image)
     cv2.waitKey(5)
 
     # Extract the lines from the navigable area only!
-    image_lines = extract_image_lines(navigable_img)
+    image_lines = extract_image_lines(image)
 
     #Extract the pedestrian paths as lines (postures or bounding boxes)
 
@@ -1131,8 +1109,8 @@ def rectify_groundPlane(image_path, segmented_img_path, navigable_img_path, dete
         # 'trajectory': [trajectory_lines, True],
         # 'trajectory_hough': [[np.concatenate((trajectory_lines[j], image_lines[j]), axis=0)
         #                       for j in range(3)] , True],
-        'postures_hough': [[np.concatenate((pedestrian_posture_paths[j], image_lines[j]), axis=0)
-                              for j in range(3)], True]
+        # 'postures_hough': [[np.concatenate((pedestrian_posture_paths[j], image_lines[j]), axis=0)
+        #                       for j in range(3)], True]
     }
 
     row = 3
@@ -1151,20 +1129,33 @@ def rectify_groundPlane(image_path, segmented_img_path, navigable_img_path, dete
         horizon = determineVP(lines, np.copy(image), plot_axis= plot_axis, asTrajectory=vp_determination_methods[k][1])
 
         leftVP, rightVP = horizon
+        image_points = np.array([[0, height], [width, height], [width, 0], [0, 0], [width / 2, height / 2]])
+
+        #Correct the image points for 4 points version
+        # corners_homo = [[*corner, 1] for corner in image_points]
+        #
+        # left_border = np.cross(corners_homo[0], corners_homo[3])
+        # right_border = np.cross(corners_homo[1], corners_homo[2])
+        # right_border = right_border / right_border[2]
+        #
+        # horizon_line = np.cross(horizon[0], horizon[1])
+        #
+        # corners_homo[0] = np.cross(left_border, horizon_line)
+        # image_points[3] = (corners_homo[0] / corners_homo[0][2])[:2]
+        # corners_homo[1] = np.cross(right_border, horizon_line)
+        # image_points[2] = (corners_homo[1] / corners_homo[1][2])[:2]
+
 
         #Stratified approach
         # img_stratified, model_corners = applyStratifiedHomography(image, list(leftVP), list(rightVP), trajectory_lines, k)
         #
         # #Google's method, which ignore affine transform and rotates according to Y axis (wall planes)
-        image_points = np.array([[0,height],[width,height],[width,0],[0,0], [width/2,height/2]])
-        google_result, model_points, H = compute_homography_and_warp(image, list(leftVP), list(rightVP), trajectory_lines,
+        warped_result, model_points, H = compute_homography_and_warp(segmented_img, list(leftVP), list(rightVP), trajectory_lines,
                                                                   image_points, clip=True, clip_factor=3, method=k)
 
         # My method using imaginary plane which utilizes 4 point approach
-        # TODO: ABONDEN
-        # allignedImg, leftVP, rightVP, alligned_corners = allignHorizon(image, horizon)
-        # img_imgPlane = applyParametretizedHomography(allignedImg, list(leftVP), list(rightVP), alligned_corners, k)
-
+        # allignedImg, leftVP, rightVP, alligned_corners = allignHorizon(segmented_img, horizon)
+        # warped_result, model_points, H = applyParametretizedHomography(allignedImg, list(leftVP), list(rightVP), alligned_corners, k)
         print("Method: {}, left: {}, right: {}".format(k,leftVP,rightVP))
 
         #Find the focal_unity length from the triangle of vanishing points
@@ -1182,7 +1173,7 @@ def rectify_groundPlane(image_path, segmented_img_path, navigable_img_path, dete
                      [0,0,1]])
 
         #Output the internal and external parameters through a text file
-        extractCameraParameters(image, model_points, image_points, K, H)
+        extractCameraParameters(image, warped_result,  model_points, image_points, K, H)
 
         #Ezio Malis, Manuel Vargas, and others. Deeper understanding of the homography decomposition for vision-based control. 2007.
 
@@ -1190,8 +1181,12 @@ def rectify_groundPlane(image_path, segmented_img_path, navigable_img_path, dete
 
 # TODO:
 # - Modify plt plots (everything should be same type) so horizon images can be seen throughout all program
-# - Add the camera params code (test)
+# - Add parameter to our method
+# - Have a through test with all videos,  coupled with Unity
+# - Correct that simulation bug about RVO
+# - We will also show the stratified approach, so be sure to document it good as well
 # - OOP revision and DONE
+# - When writing, read about pnp as it is used for placement
 if __name__ == "__main__":
     print("Welcome to the perspective corrector")
 
@@ -1200,7 +1195,6 @@ if __name__ == "__main__":
     aparser.add_argument("--image_path", help = "Image to be perspectively corrected")
     aparser.add_argument("--segmented_img_path", help = "Segmented version of the given image")
     aparser.add_argument("--detection_data_file", help = "Detection txt to be used")
-    aparser.add_argument("--navigable_img_path", help = "The colored image with navigable area only") #TODO: UNUSED
 
     args = vars(aparser.parse_args())
 

@@ -43,6 +43,32 @@ from skimage import transform
 #             (0, 4), (1, 5), (2, 6), (3, 7),
 #             (4, 8), (5, 8), (6, 9), (7, 9), (8, 9)]
 
+
+def get_four_points(im):
+
+    # Set up data to send to mouse handler
+    data = {}
+    data['im'] = im.copy()
+    data['points'] = []
+
+    # Set the callback function for any mouse event
+    cv2.imshow("Image", im)
+    cv2.setMouseCallback("Image", mouse_handler, data)
+    cv2.waitKey(0)
+
+    # Convert array to np.array
+    points = np.vstack(data['points']).astype(float)
+
+    return points
+
+
+def mouse_handler(event, x, y, flags, data):
+    if event == cv2.EVENT_LBUTTONDOWN:
+        cv2.circle(data['im'], (x, y), 3, (0, 0, 255), 5, 16);
+        cv2.imshow("Image", data['im']);
+        if len(data['points']) < 5:
+            data['points'].append([x, y])
+
 class CameraParameterWriter:
 
     def __init__(self):
@@ -53,10 +79,13 @@ class CameraParameterWriter:
         self.writer.close()
 
 
+
+
 if __name__ == '__main__':
 
     #Read original and birdview images
-    org = cv2.imread("./unityTest_3.jpg")
+    org = cv2.imread("./unityTest_7.jpg")
+    m = cv2.imread("./unityTest_8.jpg")
 
     h,w = org.shape[:2]
 
@@ -105,13 +134,25 @@ if __name__ == '__main__':
     # model_normal = np.float64([[0,0,0],[10,0,0],[0,10,0],[0,0,-10]])
     #This is what is seen on the image (From perspective)
     # wrapped_3d = np.float64([[[320, 422]], [[628,423]], [[627,111]], [[318, 111]], [[w/2,h/2]]])
-    wrapped_3d = np.float64([[[131, 299]], [[437,297]], [[365,229]], [[261, 231]], [[291,261]]])
+    wrapped_3d = get_four_points(org)
+    wrapped_3d = np.float64([[x] for x in wrapped_3d])
+    # wrapped_3d = np.float64([[[3,280]], [[568,278]], [[380,199]], [[189,199]], [[285,222]]]) #4
+    # wrapped_3d = np.float64([[[3,280]], [[568,278]], [[380,199]], [[189,199]], [[285,222]]]) #5
 
     resize = 1
     # model = np.multiply(np.float64([[-10, 0, 0], [10, 0, 0], [10, 20, 0], [-10, 20, 0], [0,10,0]]),resize)
-    model = np.multiply(np.float64([[320, h - 420,0], [628, h -423,0], [627, h -111,0], [318, h -111,0], [w // 2, h - h // 2,0]]),
-                        resize)
+    # model = np.multiply(np.float64([[-10, 0, 0], [10, 0, 0], [10, -20, 0], [-10, -20, 0], [0, -10, 0]]), resize)
+    # model = np.multiply(np.float64([[320, 115,0], [630, 115,0], [630, 425,0], [320, 425,0], [475, 270,0]]),
+    #                     resize)
+    # model = np.multiply(np.float64([[320, 425,0], [630, 425,0], [630, 115,0], [320, 117,0], [475, 270,0]]),
+    #                     resize)
+
     # model = np.multiply(np.float64([[131,h- 299,0], [437,h-297,0], [365,h-229,0], [261,h-231,0], [291,h-261,0]]),resize)
+
+    model = get_four_points(m)
+    model = np.float64([[x[0],x[1] - m.shape[0],0] for x in model])
+
+    print("MODEL: {}".format(model))
 
     rvec = np.zeros((3, 1))
     tvec = np.zeros((3, 1))
@@ -122,17 +163,19 @@ if __name__ == '__main__':
     camWriter = CameraParameterWriter()
 
     #From experiments, p3p seems like the best
-    algorithms = { "iterative": cv2.SOLVEPNP_ITERATIVE, "p3p": cv2.SOLVEPNP_P3P}
+    algorithms = { "iterative": cv2.SOLVEPNP_ITERATIVE} #, "p3p": cv2.SOLVEPNP_P3P}
 
     for v,k in enumerate(algorithms):
 
-        if k == "iterative":
-            _ret, rvec, tvec = cv2.solvePnP(model, wrapped_3d, K, dist_coef, flags=v)
+        _ret, rvec, tvec = cv2.solvePnP(model, wrapped_3d, K, dist_coef, flags=v)
 
+        if k == "iterative":
             for iteration in range(100):
                 _ret, rvec, tvec = cv2.solvePnP(model, wrapped_3d, K, dist_coef, rvec, tvec,useExtrinsicGuess = True,flags=v)
 
-
+        plt.title("The solution no:" + str(solution))
+        plt.imshow(org)
+        col = "rgb"
         for center in model:
 
             center_offset = 50 * resize
@@ -143,15 +186,23 @@ if __name__ == '__main__':
                                                             tvec,
                                                              K, dist_coef)
 
-            cv2.line(org, tuple(map(int,normal[0][0])), tuple(map(int,normal[1][0])), (0, 0, 255), 2)
+            cv2.line(org, tuple(map(int, normal[0][0])), tuple(map(int,normal[1][0])), (0, 0, 255), 2)
             cv2.line(org, tuple(map(int, normal[0][0])), tuple(map(int, normal[2][0])), (0, 255, 0), 2)
             cv2.line(org, tuple(map(int, normal[0][0])), tuple(map(int, normal[3][0])), (255, 0, 0), 2)
 
-        rvec, _ = cv2.Rodrigues(rvec)
 
         print(k)
+        rvec, _ = cv2.Rodrigues(rvec)
+
+        # u = rvec[:,1]
+        # rvec[:,1] = rvec[:,2]
+        # rvec[:,2] = u
+
+        rvec = np.transpose(rvec)
+        tvec = np.dot(-rvec, tvec)
         print("Rotation {}".format(rvec))
         print("Translation {}".format(tvec))
+
 
         # Display image
         cv2.imshow("Output", org)
@@ -163,6 +214,7 @@ if __name__ == '__main__':
         #Extrinsic Line
         tvec = [t[0] for t in tvec]
         camWriter.write("{} {} {} {} {} {} {} {} {} {} {} {}\n".format(*(rvec[:,0]),*(rvec[:,1]),*(rvec[:,2]),*tvec))
+        camWriter.writer.close()
 
 
 
