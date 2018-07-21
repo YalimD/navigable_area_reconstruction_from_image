@@ -84,7 +84,7 @@ class CameraParameterWriter:
 if __name__ == '__main__':
 
     #Read original and birdview images
-    org = cv2.imread("./unityTest_7.jpg")
+    org = cv2.imread("./unityTest_2.jpg")
     m = cv2.imread("./unityTest_8.jpg")
 
     h,w = org.shape[:2]
@@ -133,15 +133,15 @@ if __name__ == '__main__':
 
     # model_normal = np.float64([[0,0,0],[10,0,0],[0,10,0],[0,0,-10]])
     #This is what is seen on the image (From perspective)
-    # wrapped_3d = np.float64([[[320, 422]], [[628,423]], [[627,111]], [[318, 111]], [[w/2,h/2]]])
-    wrapped_3d = get_four_points(org)
-    wrapped_3d = np.float64([[x] for x in wrapped_3d])
+    wrapped_3d = np.float64([[[320, 422]], [[628,423]], [[627,111]], [[318, 111]], [[w/2,h/2]]])
+    # wrapped_3d = get_four_points(org)
+    # wrapped_3d = np.float64([[x] for x in wrapped_3d])
     # wrapped_3d = np.float64([[[3,280]], [[568,278]], [[380,199]], [[189,199]], [[285,222]]]) #4
     # wrapped_3d = np.float64([[[3,280]], [[568,278]], [[380,199]], [[189,199]], [[285,222]]]) #5
 
     resize = 1
     # model = np.multiply(np.float64([[-10, 0, 0], [10, 0, 0], [10, 20, 0], [-10, 20, 0], [0,10,0]]),resize)
-    # model = np.multiply(np.float64([[-10, 0, 0], [10, 0, 0], [10, -20, 0], [-10, -20, 0], [0, -10, 0]]), resize)
+    model = np.multiply(np.float64([[-10, 0, 0], [10, 0, 0], [10, -20, 0], [-10, -20, 0], [0, -10, 0]]), resize)
     # model = np.multiply(np.float64([[320, 115,0], [630, 115,0], [630, 425,0], [320, 425,0], [475, 270,0]]),
     #                     resize)
     # model = np.multiply(np.float64([[320, 425,0], [630, 425,0], [630, 115,0], [320, 117,0], [475, 270,0]]),
@@ -149,8 +149,8 @@ if __name__ == '__main__':
 
     # model = np.multiply(np.float64([[131,h- 299,0], [437,h-297,0], [365,h-229,0], [261,h-231,0], [291,h-261,0]]),resize)
 
-    model = get_four_points(m)
-    model = np.float64([[x[0],x[1] - m.shape[0],0] for x in model])
+    # model = get_four_points(m)
+    # model = np.float64([[x[0],x[1] - m.shape[0],0] for x in model])
 
     print("MODEL: {}".format(model))
 
@@ -173,7 +173,7 @@ if __name__ == '__main__':
             for iteration in range(100):
                 _ret, rvec, tvec = cv2.solvePnP(model, wrapped_3d, K, dist_coef, rvec, tvec,useExtrinsicGuess = True,flags=v)
 
-        plt.title("The solution no:" + str(solution))
+        # plt.title("The solution no:" + str(solution))
         plt.imshow(org)
         col = "rgb"
         for center in model:
