@@ -957,7 +957,7 @@ def extractCameraParameters(image, warped_img, model_points, image_points, K_war
     # The Y coordinate needs to be reversed as in Unity, y (z) is forward
 
     image_points = np.float64([[x] for x in model_points])
-    model_points = np.float64([[x[0], x[1] - h_warped, 0] for x in model_points])
+    model_points = np.float64([[x[0], 0, h_warped - x[1]] for x in model_points])
 
     rvec = np.zeros((3, 1))
     tvec = np.zeros((3, 1))
@@ -991,7 +991,7 @@ def extractCameraParameters(image, warped_img, model_points, image_points, K_war
     rvec_top = np.transpose(rvec_top)
     tvec_top = np.dot(-rvec_top, tvec_top)
     print("TOP NEGRO: R: {} T: {}".format(rvec_top, tvec_top))
-    cam_height = -tvec_top[2]
+    cam_height = -tvec_top[1]
     print("The height of the camera {}".format(cam_height))
 
     #Intrinsic Line
@@ -1137,7 +1137,7 @@ def rectify_groundPlane(image_path, segmented_img_path, detection_data_file):
     #If we assume the people doesn't change their velocities much
     #and calculate a homography between a path with multiple detections and
     pedestrian_bb_paths, _ = parse_pedestrian_detection(np.copy(image), detection_data_file, 10)
-    trajectory_lines, _ = parse_pedestrian_detection(np.copy(image), detection_data_file, 5, False, True, tracker_id=[56,17,10]) # Parameter
+    trajectory_lines, _ = parse_pedestrian_detection(np.copy(image), detection_data_file, 5, False, True, tracker_id=[74,91,2]) # Parameter
 
     # - Postures as both feet and head trajectories (too sensitive to noise, not preferable)
     # - Single tracker posture (better than above)
@@ -1230,6 +1230,7 @@ def rectify_groundPlane(image_path, segmented_img_path, detection_data_file):
 # - Have a through test with all videos,  coupled with Unity
 # - Correct that simulation bug about RVO
 # - We will also show the stratified approach, so be sure to document it good as well
+# - Make focal length as a parameter for both simulation and this part
 # - OOP revision and DONE
 # - When writing, read about pnp as it is used for placement
 if __name__ == "__main__":
