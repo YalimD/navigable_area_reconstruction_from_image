@@ -173,10 +173,10 @@ def compute_homography_and_warp(image, vp1, vp2, trajectories, corners, clip=Tru
     # Determine a and b for the affine component of the homography
     intersections, mean_intersection = extract_circular_points(trajectories, H, method)
 
-    # for mean_intersection in intersections:
-    A = np.eye(3, 3)
-    a = np.nan; b = np.nan
-
+    # # for mean_intersection in intersections:
+    # A = np.eye(3, 3)
+    # a = np.nan; b = np.nan
+    #
     # if len(mean_intersection) > 0:
     #     a = mean_intersection[0]
     #     b = mean_intersection[1]
@@ -273,7 +273,7 @@ def compute_homography_and_warp(image, vp1, vp2, trajectories, corners, clip=Tru
     return warped_img, transformed_corners, final_homography
 
 
-# These guys might be unnecessary
+# TODO: These guys might be unnecessary
 def get_four_points(im):
 
     # Set up data to send to mouse handler
@@ -307,19 +307,23 @@ def rectify_groundPlane(image_path, segmented_img_path, detection_data_file):
     cv2.imshow("Image to be rectified", image)
     cv2.waitKey(5)
 
-    # Extract the lines from the navigable area only!
+    # Extract the lines from the whole image
     image_lines = horizon_detector.HorizonDetectorLib.extract_image_lines(image)
 
     #Extract the pedestrian paths as lines (postures or bounding boxes)
 
     #Obtain the postures of the pedestrian as lines too, to find the VP
-    pedestrian_posture_paths, pedestrian_postures = horizon_detector.HorizonDetectorLib.parse_pedestrian_detection(np.copy(image), detection_data_file, 10, use_bounding_boxes=False, returnPosture= True)
-    pedestrian_posture_paths_single, _ = horizon_detector.HorizonDetectorLib.parse_pedestrian_detection(np.copy(image), detection_data_file, 10, use_bounding_boxes=False, tracker_id=[1,2,3]) # Parameter
+    # Parameter : The sample taken every few frames can become a performance concern
+    # TODO: Turn tracked pedestrian id's into parameters
+    pedestrian_posture_paths, pedestrian_postures = horizon_detector.HorizonDetectorLib.parse_pedestrian_detection(np.copy(image), detection_data_file, 30, use_bounding_boxes=False, returnPosture= True)
+    pedestrian_posture_paths_single, _ = horizon_detector.HorizonDetectorLib.parse_pedestrian_detection(np.copy(image), detection_data_file, 5, use_bounding_boxes=False, tracker_id=[16,21,23,25]) # Parameter
 
     #If we assume the people doesn't change their velocities much
-    #and calculate a homography between a path with multiple detections and
-    pedestrian_bb_paths, _ = horizon_detector.HorizonDetectorLib.parse_pedestrian_detection(np.copy(image), detection_data_file, 10)
-    trajectory_lines, _ = horizon_detector.HorizonDetectorLib.parse_pedestrian_detection(np.copy(image), detection_data_file, 5, False, True) # Parameter
+    #and calculate a homography between a path with multiple detections
+
+    #These methods use bounding boxes
+    pedestrian_bb_paths, _ = horizon_detector.HorizonDetectorLib.parse_pedestrian_detection(np.copy(image), detection_data_file, 30)
+    trajectory_lines, _ = horizon_detector.HorizonDetectorLib.parse_pedestrian_detection(np.copy(image), detection_data_file, 30, False, True) # Parameter
 
     # - Postures as both feet and head trajectories (too sensitive to noise, not preferable)
     # - Single tracker posture (better than above)
@@ -332,7 +336,7 @@ def rectify_groundPlane(image_path, segmented_img_path, detection_data_file):
         'single': [pedestrian_posture_paths_single, False],
         'bb': [pedestrian_bb_paths, False],
         'hough': [image_lines, True],
-        # 'trajectory': [trajectory_lines, True],
+        # 'trajectory': [trajectory_lines, True], DONT USE
         'trajectory_hough': [[np.concatenate((trajectory_lines[j], image_lines[j]), axis=0)
                               for j in range(3)] , True],
         'postures_hough': [[np.concatenate((pedestrian_posture_paths[j], image_lines[j]), axis=0)

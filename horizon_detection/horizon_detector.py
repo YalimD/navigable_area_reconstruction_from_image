@@ -24,8 +24,8 @@ class HorizonDetectorLib:
         # The image needs to be converted to grayscale first
         grayscale_img = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
         edges = feature.canny(grayscale_img, 3)
-        line_segments = transform.probabilistic_hough_line(edges, line_length=200,
-                                                   line_gap=75)
+        line_segments = transform.probabilistic_hough_line(edges, line_length=20,
+                                                   line_gap=10)
 
         # Edge detection (canny for now)
         # grayscale_img = cv2.Canny(grayscale_img, threshold1=75, threshold2=200, apertureSize=3)
@@ -35,7 +35,7 @@ class HorizonDetectorLib:
         # cv2.imshow("Detected Edges", grayscale_img)
         # cv2.waitKey(5)
 
-        # Hough lines
+        # Hough lines (OpenCV version)
         # line_segments = cv2.HoughLinesP(grayscale_img, 1, np.pi / 180, threshold=100, minLineLength=30,
         #                                 maxLineGap=30)
 
@@ -49,7 +49,7 @@ class HorizonDetectorLib:
     # In addition, Using the pedestrian postures, determine the orthogonal vanishing point using RANSAC for minimizing
     # distance between candidate line pairs
     @staticmethod
-    def parse_pedestrian_detection(image, detection_data, frames_per_check=10, use_bounding_boxes=True, feet_only=False,
+    def parse_pedestrian_detection(image, detection_data, frames_per_check=30, use_bounding_boxes=True, feet_only=False,
                                    tracker_id=None, returnPosture=False):
         latest_loc = {}
         paths = []
@@ -57,10 +57,6 @@ class HorizonDetectorLib:
 
         num_of_frames = 0
         latest_frame = 0
-        # fps = 30; resize = 1 #default
-        # frames_per_check = 1
-
-        use_bounding_boxes = False
 
         with open(detection_data) as detections:
             for i, line in enumerate(detections):
@@ -70,11 +66,21 @@ class HorizonDetectorLib:
                 agent = line.split(',')
                 frameID = int(agent[0])
 
-                # Check every frames_per_check
+                # As multiple lines can belong to the same frame, only count change in frames
+                # if frameID > latest_frame or tracker_id is not None:
+                #     latest_frame = frameID
+                #     if tracker_id is None :
+                #         num_of_frames += 1
+
                 if frameID > latest_frame:
                     latest_frame = frameID
                     num_of_frames += 1
-                if num_of_frames % frames_per_check == 0 and (tracker_id is None or int(agent[1]) in tracker_id):
+
+
+                # if num_of_frames % frames_per_check == 0 and (tracker_id is None or (tracker_id is not None and int(agent[1]) in tracker_id)):
+                if (agent[1] not in latest_loc.keys() or num_of_frames - (latest_loc[agent[1]])[2] == frames_per_check) \
+                        and (tracker_id is None or (int(agent[1]) in tracker_id)):
+
 
                     # Different methods for extracting head and feet
                     if not use_bounding_boxes:
@@ -88,7 +94,7 @@ class HorizonDetectorLib:
 
                     try:
                         prev_pos = latest_loc[agent[1]]
-
+                        print("Last seen {} at frame number: {}".format(agent[1], prev_pos[2]))
                         head_path = [prev_pos[0], headPos]
                         feet_path = [prev_pos[1], feetPos]
 
@@ -108,10 +114,11 @@ class HorizonDetectorLib:
 
                             if returnPosture:
                                 postures.append([headPos, feetPos])
-                            latest_loc[agent[1]] = [headPos, feetPos]
+                            latest_loc[agent[1]] = [headPos, feetPos, num_of_frames]
 
                     except:
-                        latest_loc[agent[1]] = [headPos, feetPos]
+                        latest_loc[agent[1]] = [headPos, feetPos, num_of_frames]
+
 
                 # else:
                 #
@@ -276,13 +283,25 @@ class HorizonDetectorLib:
             vp1 = model / model[2]
             plot_axis.plot(vp1[0], vp1[1], 'bo')
 
-            path_lines_reduced = HorizonDetectorLib.remove_inliers(vp1, path_lines, 60)
+            # Before determining the second VP, remove inliers as they already contributed to first VP
+            path_lines_reduced = HorizonDetectorLib.remove_inliers(vp1, path_lines, 30)
 
             # Find second vanishing point
             model2 = HorizonDetectorLib.ransac_vanishing_point(path_lines_reduced)
             vp2 = model2 / model2[2]
             plot_axis.plot(vp2[0], vp2[1], 'bo')
 
+            # TODO: Test if we can find the zenith vanishing point
+            # Before determining the second VP, remove inliers as they already contributed to first VP
+            path_lines_reduced_again = HorizonDetectorLib.remove_inliers(vp2, path_lines_reduced, 60)
+
+            # Find second vanishing point
+            model3 = HorizonDetectorLib.ransac_vanishing_point(path_lines_reduced_again)
+            vp3 = model3 / model3[2]
+            plot_axis.plot(vp3[0], vp3[1], 'bo')
+
+            # # Parameter: Only use for debugging, overcrowds the image if used
+            #
             # for i in range(centers.shape[0]):
             #     xax = [centers[i, 0], vp1[0]]
             #     yax = [centers[i, 1], vp1[1]]
@@ -390,7 +409,7 @@ class HorizonDetectorLib:
         num_pts = strengths.size
 
         arg_sort = np.argsort(-strengths)
-        first_index_space = arg_sort if num_pts < 20 else arg_sort[:num_pts // 5]  # Top 25 percentile
+        first_index_space = arg_sort if num_pts < 20 else arg_sort[:num_pts // 5]  # Top 20 percentile
         second_index_space = arg_sort if num_pts < 20 else arg_sort[:num_pts // 2]  # Top 50 percentile
 
         best_model = None
@@ -482,7 +501,7 @@ class HorizonDetectorLib:
         edgelets_new: tuple of ndarrays
             All Edgelets except those which are inliers to model.
         """
-        inliers = HorizonDetectorLib.compute_votes(edgelets, model, 10) > 0
+        inliers = HorizonDetectorLib.compute_votes(edgelets, model, threshold_inlier) > 0
         locations, directions, strengths = edgelets
         locations = locations[~inliers]
         directions = directions[~inliers]
