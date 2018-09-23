@@ -315,15 +315,18 @@ def rectify_groundPlane(image_path, segmented_img_path, detection_data_file):
     #Obtain the postures of the pedestrian as lines too, to find the VP
     # Parameter : The sample taken every few frames can become a performance concern
     # TODO: Turn tracked pedestrian id's into parameters
-    pedestrian_posture_paths, pedestrian_postures = horizon_detector.HorizonDetectorLib.parse_pedestrian_detection(np.copy(image), detection_data_file, 30, use_bounding_boxes=False, returnPosture= True)
-    pedestrian_posture_paths_single, _ = horizon_detector.HorizonDetectorLib.parse_pedestrian_detection(np.copy(image), detection_data_file, 5, use_bounding_boxes=False, tracker_id=[16,21,23,25]) # Parameter
+    pedestrian_posture_paths, pedestrian_postures = horizon_detector.HorizonDetectorLib.parse_pedestrian_detection(np.copy(image), detection_data_file, 60, use_bounding_boxes=False, returnPosture= True)
+    pedestrian_posture_paths_single, _ = horizon_detector.HorizonDetectorLib.parse_pedestrian_detection(np.copy(image), detection_data_file, 5, use_bounding_boxes=False, tracker_id=[56,17,10]) # Parameter
 
     #If we assume the people doesn't change their velocities much
     #and calculate a homography between a path with multiple detections
 
     #These methods use bounding boxes
-    pedestrian_bb_paths, _ = horizon_detector.HorizonDetectorLib.parse_pedestrian_detection(np.copy(image), detection_data_file, 30)
-    trajectory_lines, _ = horizon_detector.HorizonDetectorLib.parse_pedestrian_detection(np.copy(image), detection_data_file, 30, False, True) # Parameter
+    pedestrian_bb_paths, _ = horizon_detector.HorizonDetectorLib.parse_pedestrian_detection(np.copy(image), detection_data_file, 60)
+    trajectory_lines, _ = horizon_detector.HorizonDetectorLib.parse_pedestrian_detection(np.copy(image), detection_data_file, 60, False, True) # Parameter
+
+    # pedestrian_postures_image_lines = [np.concatenate((pedestrian_postures[j], image_lines[j]), axis=0)
+    #                        for j in range(3)]
 
     # - Postures as both feet and head trajectories (too sensitive to noise, not preferable)
     # - Single tracker posture (better than above)
@@ -357,53 +360,54 @@ def rectify_groundPlane(image_path, segmented_img_path, detection_data_file):
         plot_axis = horizon_axis[i//col, i % col]
         plot_axis.set_title(str(k))
         plot_axis.imshow(image)
-        horizon = horizon_detector.HorizonDetectorLib.determineVP(lines, np.copy(image), plot_axis= plot_axis, asTrajectory=vp_determination_methods[k][1])
 
-        leftVP, rightVP = horizon
+        if len(lines[0]) > 0:
+            leftVP, rightVP, zenith_vp = horizon_detector.HorizonDetectorLib.determineVP(lines, np.copy(image), plot_axis= plot_axis, asTrajectory=vp_determination_methods[k][1])
+
+            horizon = [leftVP, rightVP]
+
+            #Get the image corners
+            image_points = np.array([[0, height], [width, height], [width, 0], [0, 0]])
+
+            #Find the focal_unity length from the triangle of vanishing points
+
+            zenith_vp, focal_length = horizon_detector.HorizonDetectorLib.ransac_zenith_vp(pedestrian_postures, horizon, [width/2, height/2, 1], zenith=zenith_vp)
+            zenith_vp = zenith_vp / zenith_vp[2]
+            fov = math.degrees(2 * math.atan(height / (2 * focal_length)))
+
+            print("Method: {}, left: {}, right: {}".format(k,leftVP,rightVP))
+            print("Zenith: {}, focal: {} with fov: {}".format(zenith_vp, focal_length, fov))
+
+            plot_axis.imshow(image)
+            plot_axis.plot((zenith_vp[0]), (zenith_vp[1]), 'yo')
 
 
-        #Get the image corners that are below the horizon line
-        image_points = np.array([[0, height], [width, height], [width, 0], [0, 0]])
-
-
-        #Stratified approach is combined with Google's method
+        #Stratified approach is combined with Google's method NOT USED
         # img_stratified, model_corners = applyStratifiedHomography(image, list(leftVP), list(rightVP), trajectory_lines, k)
         #
 
         # Complete stratified approach that rectifies and translates the navigable area
-        warped_result, model_points, H = compute_homography_and_warp(segmented_img, list(leftVP), list(rightVP), trajectory_lines,
-                                                                  image_points, clip=True, clip_factor=3, method=k)
-
-        plot_axis = rectified_axis[i//col, i % col]
-        plot_axis.set_title(str(k))
-        plot_axis.imshow(warped_result)
-
-        for i in range(len(model_points)):
-            plot_axis.plot([model_points[i][0], model_points[(i + 1) % 4][0]],
-                     [model_points[i][1], model_points[(i + 1) % 4][1]], 'b')
-
-
-        plt.imsave("warped_result_" + k +".png", warped_result)
-
-
 
         if False:
+            warped_result, model_points, H = compute_homography_and_warp(segmented_img, list(leftVP), list(rightVP), trajectory_lines,
+                                                                      image_points, clip=True, clip_factor=3, method=k)
+
+            plot_axis = rectified_axis[i//col, i % col]
+            plot_axis.set_title(str(k))
+            plot_axis.imshow(warped_result)
+
+            for i in range(len(model_points)):
+                plot_axis.plot([model_points[i][0], model_points[(i + 1) % 4][0]],
+                         [model_points[i][1], model_points[(i + 1) % 4][1]], 'b')
+
+
+            plt.imsave("warped_result_" + k +".png", warped_result)
+
             #TODO: ABONDEN
             # My method using imaginary plane which utilizes 4 point approach
             # allignedImg, leftVP, rightVP, alligned_corners = allignHorizon(segmented_img, horizon)
             # warped_result, model_points, H = applyParametretizedHomography(allignedImg, list(leftVP), list(rightVP), alligned_corners, k)
-            print("Method: {}, left: {}, right: {}".format(k,leftVP,rightVP))
 
-            #Find the focal_unity length from the triangle of vanishing points
-            #TODO: Needs a re-look as focal length is a little off
-            pedestrian_postures = [np.concatenate((pedestrian_postures[j], image_lines[j]), axis=0)
-             for j in range(3)]
-            zenith_vp, focal_length = horizon_detector.HorizonDetectorLib.ransac_zenith_vp(pedestrian_postures, horizon, [width/2,height/2, 1])
-            zenith_vp = zenith_vp / zenith_vp[2]
-
-            # plt.imshow(image)
-            # plt.plot((zenith_vp[0]), (zenith_vp[1]), 'ro')
-            # plt.show()
 
             #Intrinsic matrix for camera, same for both model (rectification camera) and scene camera
             K = np.array([[focal_length,0,warped_result.shape[1]/2],

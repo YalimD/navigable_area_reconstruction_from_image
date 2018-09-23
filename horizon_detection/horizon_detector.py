@@ -24,6 +24,7 @@ class HorizonDetectorLib:
         # The image needs to be converted to grayscale first
         grayscale_img = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
         edges = feature.canny(grayscale_img, 3)
+        # TODO: Parameter
         line_segments = transform.probabilistic_hough_line(edges, line_length=20,
                                                    line_gap=10)
 
@@ -94,7 +95,7 @@ class HorizonDetectorLib:
 
                     try:
                         prev_pos = latest_loc[agent[1]]
-                        print("Last seen {} at frame number: {}".format(agent[1], prev_pos[2]))
+                        # print("Last seen {} at frame number: {}".format(agent[1], prev_pos[2]))
                         head_path = [prev_pos[0], headPos]
                         feet_path = [prev_pos[1], feetPos]
 
@@ -230,6 +231,7 @@ class HorizonDetectorLib:
     # Determines the vanishing points on horizon using information coming from pedestrian paths
     # OR uses the trajectory information and/or edges from the image to detect vanishing points
     # which will determine the horizon
+    # TODO: Parameters for thresholds
     @staticmethod
     def determineVP(path_lines, image, plot_axis, asTrajectory=False):
         centers, directions, strengths = path_lines
@@ -275,6 +277,7 @@ class HorizonDetectorLib:
 
             vp_left = (line_X[0][0], line_Y[0][0], 1)
             vp_right = (line_X[-1][0], line_Y[-1][0], 1)
+            vp_zenith = None #We find the zenith vanishing point elsewhere, but I think the method below is better
 
         else:
 
@@ -284,16 +287,16 @@ class HorizonDetectorLib:
             plot_axis.plot(vp1[0], vp1[1], 'bo')
 
             # Before determining the second VP, remove inliers as they already contributed to first VP
-            path_lines_reduced = HorizonDetectorLib.remove_inliers(vp1, path_lines, 30)
+            path_lines_reduced = HorizonDetectorLib.remove_inliers(vp1, path_lines, 20)
 
             # Find second vanishing point
             model2 = HorizonDetectorLib.ransac_vanishing_point(path_lines_reduced)
             vp2 = model2 / model2[2]
             plot_axis.plot(vp2[0], vp2[1], 'bo')
 
-            # TODO: Test if we can find the zenith vanishing point
+            # Test if we can find the zenith vanishing point
             # Before determining the second VP, remove inliers as they already contributed to first VP
-            path_lines_reduced_again = HorizonDetectorLib.remove_inliers(vp2, path_lines_reduced, 60)
+            path_lines_reduced_again = HorizonDetectorLib.remove_inliers(vp2, path_lines_reduced, 20)
 
             # Find second vanishing point
             model3 = HorizonDetectorLib.ransac_vanishing_point(path_lines_reduced_again)
@@ -311,21 +314,31 @@ class HorizonDetectorLib:
             #     yax = [centers[i, 1], vp2[1]]
             #     plot_axis.plot(xax, yax, 'b-.')
 
+            # The vanishing point with highest y value is taken as the zenith 8as we are looking at the world birdview)
+            vanishers = [vp1,vp2,vp3]
+            # vanishers = [[1,1], [-5,0], [2,-1]]
+            vanishers.sort(key=lambda v: v[1])
+            horizon = vanishers[:2]
+            horizon.sort(key=lambda v:v[0])
+
+            vp_left, vp_right, vp_zenith = horizon[0], horizon[1], vanishers[2]
+
             line_X = [[vp1[0], vp2[0]]]
             line_Y = [[vp1[1], vp2[1]]]
 
-            vp_left, vp_right = (vp1, vp2) if vp1[0] < vp2[0] else (vp2, vp1)
-
         plot_axis.plot(line_X, line_Y, color='g')
 
-        return [vp_left, vp_right]
+        return [vp_left, vp_right, vp_zenith]
 
 
     # Problem: The zenith vanishing point appears at the same side of the vanishing line against center of the image, which is impossible
     # Solution: Find the distance to both and if distance to center is longer than the distance to horizon, ignore model
     # Needs: center point
     @staticmethod
-    def ransac_zenith_vp(edgelets, horizon, image_center, num_ransac_iter=2000, threshold_inlier=5):
+    def ransac_zenith_vp(edgelets, horizon, image_center, num_ransac_iter=2000, threshold_inlier=5, zenith = None):
+
+        # If no zenith vp is given, calculate it from postures and image lines
+
         locations, directions, strengths = edgelets
         lines = HorizonDetectorLib.edgelet_lines(edgelets)
 
@@ -336,42 +349,43 @@ class HorizonDetectorLib:
         first_index_space = arg_sort if num_pts < 20 else arg_sort[:num_pts // 5]  # Top 25 percentile
         second_index_space = arg_sort if num_pts < 20 else arg_sort[:num_pts // 2]  # Top 50 percentile
 
-        best_model = None
+        best_model = zenith
         best_votes = np.zeros(num_pts)
 
         # Normalize the horizon
         horizon_homogenous = np.cross(horizon[0], horizon[1])
         horizon_homogenous = horizon_homogenous / np.sqrt(horizon_homogenous[0] ** 2 + horizon_homogenous[1] ** 2)
 
-        for ransac_iter in range(num_ransac_iter):
-            ind1 = np.random.choice(first_index_space)
-            ind2 = np.random.choice(second_index_space)
-
-            while ind2 == ind1:  # Protection against low line count
+        if best_model is None:
+            for ransac_iter in range(num_ransac_iter):
+                ind1 = np.random.choice(first_index_space)
                 ind2 = np.random.choice(second_index_space)
 
-            l1 = lines[ind1]
-            l2 = lines[ind2]
+                while ind2 == ind1:  # Protection against low line count
+                    ind2 = np.random.choice(second_index_space)
 
-            current_model = np.cross(l1, l2)  # Potential vanishing point
-            current_model = current_model / current_model[2]
+                l1 = lines[ind1]
+                l2 = lines[ind2]
 
-            # Its distance to center and the horizon
-            horizon_distance = np.abs(np.dot(current_model.T, horizon_homogenous))
-            centre_distance = np.linalg.norm(current_model[:2] - image_center[:2])
+                current_model = np.cross(l1, l2)  # Potential vanishing point
+                current_model = current_model / current_model[2]
 
-            if np.sum(current_model ** 2) < 1 or current_model[2] == 0 or horizon_distance < centre_distance:
-                # reject degenerate candidates, which lie on the wrong side of the horizon
-                continue
+                # Its distance to center and the horizon
+                horizon_distance = np.abs(np.dot(current_model.T, horizon_homogenous))
+                centre_distance = np.linalg.norm(current_model[:2] - image_center[:2])
 
-            current_votes = HorizonDetectorLib.compute_votes(
-                edgelets, current_model, threshold_inlier)
+                if np.sum(current_model ** 2) < 1 or current_model[2] == 0 or horizon_distance < centre_distance:
+                    # reject degenerate candidates, which lie on the wrong side of the horizon
+                    continue
 
-            if current_votes.sum() > best_votes.sum():
-                best_model = current_model
-                best_votes = current_votes
-                # logging.info("Current best model has {} votes at iteration {}".format(
-                #     current_votes.sum(), ransac_iter))
+                current_votes = HorizonDetectorLib.compute_votes(
+                    edgelets, current_model, threshold_inlier)
+
+                if current_votes.sum() > best_votes.sum():
+                    best_model = current_model
+                    best_votes = current_votes
+                    # logging.info("Current best model has {} votes at iteration {}".format(
+                    #     current_votes.sum(), ransac_iter))
 
         center_vp_dist = (np.linalg.norm(best_model[:2] - image_center[:2]))
         center_hor_dist = np.dot(np.array(image_center), horizon_homogenous)
