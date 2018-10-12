@@ -1,6 +1,8 @@
 import cv2
 import numpy as np
 import math
+import matplotlib.lines as lines
+
 from sklearn import linear_model
 from skimage import transform, feature
 
@@ -24,9 +26,9 @@ class HorizonDetectorLib:
         # The image needs to be converted to grayscale first
         grayscale_img = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
         edges = feature.canny(grayscale_img, 3)
-        # TODO: Parameter
-        line_segments = transform.probabilistic_hough_line(edges, line_length=20,
-                                                   line_gap=10)
+        # Parameter: Parameter
+        line_segments = transform.probabilistic_hough_line(edges, line_length=100,
+                                                   line_gap=30)
 
         # Edge detection (canny for now)
         # grayscale_img = cv2.Canny(grayscale_img, threshold1=75, threshold2=200, apertureSize=3)
@@ -79,7 +81,7 @@ class HorizonDetectorLib:
 
 
                 # if num_of_frames % frames_per_check == 0 and (tracker_id is None or (tracker_id is not None and int(agent[1]) in tracker_id)):
-                if (agent[1] not in latest_loc.keys() or num_of_frames - (latest_loc[agent[1]])[2] == frames_per_check) \
+                if (agent[1] not in latest_loc.keys() or num_of_frames - (latest_loc[agent[1]])[2] >= frames_per_check) \
                         and (tracker_id is None or (int(agent[1]) in tracker_id)):
 
 
@@ -233,14 +235,16 @@ class HorizonDetectorLib:
     # which will determine the horizon
     # TODO: Parameters for thresholds
     @staticmethod
-    def determineVP(path_lines, image, plot_axis, asTrajectory=False):
+    def determineVP(path_lines, image, plot_axis, asTrajectory=False, ground_truth = None, draw_features = False):
         centers, directions, strengths = path_lines
 
-        for i in range(centers.shape[0]):
-            plot_axis.plot([centers[i][0] - (directions[i][0] * strengths[i]),
-                            centers[i][0] + (directions[i][0] * strengths[i])],
-                           [centers[i][1] - (directions[i][1] * strengths[i]),
-                            centers[i][1] + (directions[i][1] * strengths[i])], 'r-')
+        # Draw the path lines
+        if draw_features:
+            for i in range(centers.shape[0]):
+                plot_axis.plot([centers[i][0] - (directions[i][0] * strengths[i]),
+                                centers[i][0] + (directions[i][0] * strengths[i])],
+                               [centers[i][1] - (directions[i][1] * strengths[i]),
+                                centers[i][1] + (directions[i][1] * strengths[i])], 'r-')
 
         vxs = []
         vys = []
@@ -255,7 +259,7 @@ class HorizonDetectorLib:
                 feet = normals[2 * i + 1]
 
                 vx, vy, n = np.cross(head, feet);
-                vx /= n;
+                vx /= n
                 vy /= n
                 if math.isfinite(vx) and math.isfinite(vy):
                     vxs.append(vx)
@@ -287,7 +291,7 @@ class HorizonDetectorLib:
             plot_axis.plot(vp1[0], vp1[1], 'bo')
 
             # Before determining the second VP, remove inliers as they already contributed to first VP
-            path_lines_reduced = HorizonDetectorLib.remove_inliers(vp1, path_lines, 20)
+            path_lines_reduced = HorizonDetectorLib.remove_inliers(vp1, path_lines, 30)
 
             # Find second vanishing point
             model2 = HorizonDetectorLib.ransac_vanishing_point(path_lines_reduced)
@@ -296,7 +300,7 @@ class HorizonDetectorLib:
 
             # Test if we can find the zenith vanishing point
             # Before determining the second VP, remove inliers as they already contributed to first VP
-            path_lines_reduced_again = HorizonDetectorLib.remove_inliers(vp2, path_lines_reduced, 20)
+            path_lines_reduced_again = HorizonDetectorLib.remove_inliers(vp2, path_lines_reduced, 60)
 
             # Find second vanishing point
             model3 = HorizonDetectorLib.ransac_vanishing_point(path_lines_reduced_again)
@@ -316,17 +320,24 @@ class HorizonDetectorLib:
 
             # The vanishing point with highest y value is taken as the zenith 8as we are looking at the world birdview)
             vanishers = [vp1,vp2,vp3]
-            # vanishers = [[1,1], [-5,0], [2,-1]]
             vanishers.sort(key=lambda v: v[1])
-            horizon = vanishers[:2]
-            horizon.sort(key=lambda v:v[0])
+            horizon_points = vanishers[:2]
+            horizon_points.sort(key=lambda v:v[0])
 
-            vp_left, vp_right, vp_zenith = horizon[0], horizon[1], vanishers[2]
+            vp_left, vp_right, vp_zenith = horizon_points[0], horizon_points[1], vanishers[2]
 
-            line_X = [[vp1[0], vp2[0]]]
-            line_Y = [[vp1[1], vp2[1]]]
+            line_X = np.arange(vp_left[0], vp_right[0])[:, np.newaxis]
+            horizon_line = np.cross(vp_left,vp_right)
+            horizon_line = horizon_line / horizon_line[2]
 
-        plot_axis.plot(line_X, line_Y, color='g')
+            # line_X = [[vp_left[0], vp_right[0]]]
+            line_Y = list(map(lambda point: (-horizon_line[0] * point[0] - horizon_line[2]) / horizon_line[1], line_X))
+
+        plot_axis.plot(line_X, line_Y, color='r')
+
+        if ground_truth:
+            line_Y = list(map(lambda point: (-ground_truth[0] * point[0] - ground_truth[2]) / ground_truth[1], line_X))
+            plot_axis.plot(line_X, line_Y, color='g')
 
         return [vp_left, vp_right, vp_zenith]
 

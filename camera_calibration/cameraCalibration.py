@@ -1,6 +1,6 @@
 import numpy as np
 import cv2
-import matplotlib as plt
+import matplotlib.pyplot as plt
 import skimage.transform as transform
 
 __all__ = ["CameraCalibration"]
@@ -16,7 +16,7 @@ class CameraParameterWriter:
 
 class CameraCalibration:
 
-    cameraWriter = CameraParameterWriter()
+    camWriter = CameraParameterWriter()
 
     # TODO: Comment and explain
     @staticmethod
@@ -39,6 +39,7 @@ class CameraCalibration:
 
         model_points = transform.matrix_transform(image_points, H)
 
+        plt.figure()
         plt.imshow(warped_img)
 
         for i in range(len(model_points)):
@@ -58,7 +59,7 @@ class CameraCalibration:
 
         # For writing these results to an output file
         # TODO: There should be a single cam writer for all program
-        camWriter = CameraParameterWriter()
+        # camWriter = CameraParameterWriter()
 
         # From experiments, p3p seems like the best
         algorithms = {
@@ -157,10 +158,10 @@ class CameraCalibration:
                 image = np.copy(clean_img)
 
                 # Intrinsic Line
-                camWriter.write("{} {} {} {} {} {}\n".format(w_org, h_org, K[0][2], K[1][2], K[0][0], K[1][1]))
+                CameraCalibration.camWriter.write("{} {} {} {} {} {}\n".format(w_org, h_org, K[0][2], K[1][2], K[0][0], K[1][1]))
 
                 # Extrinsic Line
                 tvec = [t[0] for t in tvec]
-                camWriter.write("{} {} {} {} {} {} {} {} {} {} {} {} {} {}\n".format(*(rvec[:, 0]), *(rvec[:, 1]),
+                CameraCalibration.camWriter.write("{} {} {} {} {} {} {} {} {} {} {} {} {} {}\n".format(*(rvec[:, 0]), *(rvec[:, 1]),
                                                                                      *(rvec[:, 2]), *tvec, w_warped,
                                                                                      h_warped))
