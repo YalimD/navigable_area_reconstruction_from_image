@@ -273,29 +273,41 @@ def compute_homography_and_warp(image, vp1, vp2, trajectories, corners, clip=Tru
     return warped_img, transformed_corners, final_homography
 
 
-# TODO: These guys might be unnecessary
-def get_four_points(im):
+def mouse_handler(event, x, y, flags, data):
 
-    # Set up data to send to mouse handler
-    data = {}
-    data['im'] = im.copy()
-    data['points'] = []
+    if event == cv2.EVENT_LBUTTONDOWN:
 
-    # Set the callback function for any mouse event
-    cv2.imshow("Image", im)
-    cv2.setMouseCallback("Image", mouse_handler, data)
+        if len(data) < 8:
+            data['points'].append([x, y, 1])
+            cv2.circle(data['image'], (x, y), 3, (0, 0, 255), 5, 16)
+            cv2.imshow(data['windowName'], data['image'])
+
+def determineCross(line1, line2):
+
+    cross = np.cross(line1, line2)
+    return cross / cross[2]
+
+def processPoints(data):
+
+    lineA = determineCross(*data['points'][0:2])
+    lineB = determineCross(*data['points'][2:4])
+    point1 = list(map(lambda x: int(x), determineCross(lineA, lineB)))
+
+    lineA = determineCross(*data['points'][4:6])
+    lineB = determineCross(*data['points'][6:8])
+    point2 = list(map(lambda x: int(x), determineCross(lineA, lineB)))
+
+    vanishing = determineCross(point1, point2)
+
+    cv2.circle(data['image'], (point1[0], point1[1]), 3, (0, 255, 0), 5, 16)
+    cv2.circle(data['image'], (point2[0], point2[1]), 3, (0, 255, 0), 5, 16)
+
+    cv2.line(data['image'], (point1[0], point1[1]), (point2[0], point2[1]), (255, 0, 0), 5, 16)
+    cv2.imshow(data['windowName'], data['image'])
     cv2.waitKey(0)
 
-    # Convert array to np.array
-    points = np.vstack(data['points']).astype(float)
+    return vanishing
 
-    return points
-def mouse_handler(event, x, y, flags, data):
-    if event == cv2.EVENT_LBUTTONDOWN:
-        cv2.circle(data['im'], (x, y), 3, (0, 0, 255), 5, 16);
-        cv2.imshow("Image", data['im']);
-        if len(data['points']) < 10:
-            data['points'].append([x, y])
 
 #Main method that is used to rectify the ground plane
 def rectify_groundPlane(image_path, segmented_img_path, detection_data_file, frames_per_check, ground_truth_horizon, draw_features):
@@ -304,8 +316,28 @@ def rectify_groundPlane(image_path, segmented_img_path, detection_data_file, fra
     image = cv2.imread(image_path)
     segmented_img = cv2.imread(segmented_img_path)
 
-    cv2.imshow("Image to be rectified", image)
-    cv2.waitKey(5)
+
+
+    if ground_truth_horizon is None:
+        clicked_points = {}
+        clicked_points['image'] = np.copy(image)
+        clicked_points['points'] = []
+
+        window_name = "Click on 8 points on the image whree every 2 consecutive point describes a line and every 2 lines" \
+                   "meets at horizon"
+        clicked_points['windowName'] = window_name
+
+        cv2.imshow(window_name, image)
+        cv2.setMouseCallback(window_name, mouse_handler, clicked_points)
+        cv2.waitKey(0)
+
+        ground_truth_horizon = processPoints(clicked_points)
+
+    else:
+        cv2.imshow("Image of Interest", image)
+        cv2.waitKey(5)
+
+    print("Ground-truth vanishing line {}".format(ground_truth_horizon))
 
     # Extract the lines from the whole image
     image_lines = horizon_detector.HorizonDetectorLib.extract_image_lines(image)
@@ -363,14 +395,14 @@ def rectify_groundPlane(image_path, segmented_img_path, detection_data_file, fra
 
         # In case no suitable lines for horizon calculation is found, skip
         if len(lines[0]) > 0:
-            leftVP, rightVP, zenith_vp = horizon_detector.HorizonDetectorLib.determineVP(lines,
+            leftVP, rightVP, zenith_vp, r_mse = horizon_detector.HorizonDetectorLib.determineVP(lines,
                                                                                          np.copy(image),
                                                                                          plot_axis= plot_axis,
+                                                                                         ground_truth=ground_truth_horizon,
                                                                                          asTrajectory=vp_determination_methods[k][1],
-                                                                                         ground_truth = ground_truth_horizon,
                                                                                          draw_features = draw_features)
 
-
+            plot_axis.set_title(str(k) + " RMSE: " + str(r_mse))
             horizon = [leftVP, rightVP]
 
             #Get the image corners
@@ -461,7 +493,7 @@ if __name__ == "__main__":
     aparser.add_argument("--frames_per_check", help = "How many frames needs to pass before new position is sampled",
                          type=int, default=60)
     aparser.add_argument("--ground_truth_horizon", nargs='+', help = "Homogenous coordinates of the ground truth, all 3 coordinates",
-                         type=float)
+                         type=float, default = None)
     aparser.add_argument("--draw_features", nargs='+', help = "Draw the postures, image lines and such features on the image when determining the horizon",
                          type=bool, default=False)
 

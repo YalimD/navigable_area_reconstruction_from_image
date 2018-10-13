@@ -235,7 +235,7 @@ class HorizonDetectorLib:
     # which will determine the horizon
     # TODO: Parameters for thresholds
     @staticmethod
-    def determineVP(path_lines, image, plot_axis, asTrajectory=False, ground_truth = None, draw_features = False):
+    def determineVP(path_lines, image, plot_axis, ground_truth, asTrajectory=False,  draw_features = False):
         centers, directions, strengths = path_lines
 
         # Draw the path lines
@@ -335,11 +335,18 @@ class HorizonDetectorLib:
 
         plot_axis.plot(line_X, line_Y, color='r')
 
-        if ground_truth:
-            line_Y = list(map(lambda point: (-ground_truth[0] * point[0] - ground_truth[2]) / ground_truth[1], line_X))
-            plot_axis.plot(line_X, line_Y, color='g')
+        gt_Y = np.array(list(map(lambda point: (-ground_truth[0] * point[0] - ground_truth[2]) / ground_truth[1], line_X)))
+        plot_axis.plot(line_X, gt_Y, color='g')
 
-        return [vp_left, vp_right, vp_zenith]
+        s = 0
+        for i in range(len(gt_Y)):
+            s += ((line_Y[i] - gt_Y[i]) ** 2)
+        r_mse = np.sqrt(s / len(gt_Y))
+
+        # Normalize the mse as the amount of data differs between horizon calculations
+        r_mse = r_mse * (100 / len(gt_Y))
+
+        return [vp_left, vp_right, vp_zenith, r_mse]
 
 
     # Problem: The zenith vanishing point appears at the same side of the vanishing line against center of the image, which is impossible
