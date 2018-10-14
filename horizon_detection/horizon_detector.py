@@ -27,8 +27,8 @@ class HorizonDetectorLib:
         grayscale_img = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
         edges = feature.canny(grayscale_img, 3)
         # Parameter: Parameter
-        line_segments = transform.probabilistic_hough_line(edges, line_length=100,
-                                                   line_gap=30)
+        line_segments = transform.probabilistic_hough_line(edges, line_length=10,
+                                                   line_gap=10)
 
         # Edge detection (canny for now)
         # grayscale_img = cv2.Canny(grayscale_img, threshold1=75, threshold2=200, apertureSize=3)
@@ -267,7 +267,6 @@ class HorizonDetectorLib:
                     plot_axis.plot([vx], [vy], 'bo')
 
             # Use RANSAC to determine the vanishing line
-
             sorted_ind = np.argsort(vys)
             sorted_ind = sorted_ind[:int(len(sorted_ind))]
 
@@ -356,7 +355,6 @@ class HorizonDetectorLib:
     def ransac_zenith_vp(edgelets, horizon, image_center, num_ransac_iter=2000, threshold_inlier=5, zenith = None):
 
         # If no zenith vp is given, calculate it from postures and image lines
-
         locations, directions, strengths = edgelets
         lines = HorizonDetectorLib.edgelet_lines(edgelets)
 
@@ -372,7 +370,15 @@ class HorizonDetectorLib:
 
         # Normalize the horizon
         horizon_homogenous = np.cross(horizon[0], horizon[1])
-        horizon_homogenous = horizon_homogenous / np.sqrt(horizon_homogenous[0] ** 2 + horizon_homogenous[1] ** 2)
+
+        # These two are actually the same
+        # horizon_homogenous = horizon_homogenous / np.sqrt(horizon_homogenous[0] ** 2 + horizon_homogenous[1] ** 2)
+        horizon_homogenous = horizon_homogenous / horizon_homogenous[2]
+
+        # TODO: Delete, modified region
+        horizon_homogenous = [-0.00000386579506, -0.00342122863,   1]
+        left_vp = np.array([0,(-horizon_homogenous[0] * 0 - horizon_homogenous[2]) / horizon_homogenous[1],1])
+        right_vp = np.array([1000,(-horizon_homogenous[0] * 1000 - horizon_homogenous[2]) / horizon_homogenous[1],1])
 
         if best_model is None:
             for ransac_iter in range(num_ransac_iter):
@@ -387,10 +393,12 @@ class HorizonDetectorLib:
 
                 current_model = np.cross(l1, l2)  # Potential vanishing point
                 current_model = current_model / current_model[2]
+                # TODO: Modified region
+                current_model = np.array([386,1174,1])
 
                 # Its distance to center and the horizon
                 horizon_distance = np.abs(np.dot(current_model.T, horizon_homogenous))
-                centre_distance = np.linalg.norm(current_model[:2] - image_center[:2])
+                centre_distance = 0 #np.linalg.norm(current_model[:2] - image_center[:2])
 
                 if np.sum(current_model ** 2) < 1 or current_model[2] == 0 or horizon_distance < centre_distance:
                     # reject degenerate candidates, which lie on the wrong side of the horizon
@@ -405,11 +413,40 @@ class HorizonDetectorLib:
                     # logging.info("Current best model has {} votes at iteration {}".format(
                     #     current_votes.sum(), ransac_iter))
 
-        center_vp_dist = (np.linalg.norm(best_model[:2] - image_center[:2]))
-        center_hor_dist = np.dot(np.array(image_center), horizon_homogenous)
-        focal_length = np.sqrt(center_vp_dist * center_hor_dist)
+        # The image center is NOT THE CENTER OF THE IMAGE. It should be the orthocenter of the triangle
+        v1_z = np.cross(best_model, left_vp)
+        v1_z = v1_z / v1_z[2]
+        v2_z = np.cross(best_model, right_vp)
+        v2_z = v2_z / v2_z[2]
 
-        return best_model, focal_length
+        v1_v2_len = np.linalg.norm(left_vp[:2] - right_vp[:2])
+        v1_zen_len = np.linalg.norm(left_vp[:2] - current_model[:2])
+        v2_zen_len = np.linalg.norm(right_vp[:2] - current_model[:2])
+
+        v1_angle = np.tan(np.arccos(np.dot(horizon_homogenous, v1_z) / (v1_v2_len * v1_zen_len)))
+        v2_angle = np.tan(np.arccos(np.dot(horizon_homogenous, v2_z) / (v1_v2_len * v2_zen_len)))
+        zenith_angle = np.tan(np.arccos(np.dot(v1_z, v2_z) / (v1_zen_len * v2_zen_len)))
+
+        image_center[0] = (left_vp[0] * v1_angle +
+                           right_vp[0] * v2_angle +
+                           best_model[0] * zenith_angle) / (v1_angle + v2_angle + zenith_angle)
+
+        image_center[1] = (left_vp[1] * v1_angle +
+                           right_vp[1] * v2_angle +
+                           best_model[1] * zenith_angle) / (v1_angle + v2_angle + zenith_angle)
+
+
+        # center_vp_dist = (np.linalg.norm(best_model[:2] - image_center[:2]))
+        center_hor_dist = np.abs(np.dot(np.array(image_center), horizon_homogenous)) / np.linalg.norm(horizon_homogenous[:2])
+        # focal_length = np.sqrt(center_vp_dist * center_hor_dist)
+
+        center_v1 = np.linalg.norm(image_center - left_vp)
+        center_v2 = np.linalg.norm(image_center - right_vp)
+
+        focal_length = np.sqrt(np.abs((np.sqrt(center_v1 ** 2 - center_hor_dist ** 2))*(np.sqrt(center_v2 ** 2 - center_hor_dist ** 2))
+                               - (center_hor_dist ** 2)))
+
+        return best_model, focal_length, image_center
 
     @staticmethod
     def ransac_vanishing_point(edgelets, num_ransac_iter=2000, threshold_inlier=5):

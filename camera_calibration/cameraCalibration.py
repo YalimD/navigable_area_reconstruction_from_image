@@ -28,14 +28,7 @@ class CameraCalibration:
         clean_img = np.copy(image)
 
         # For displaying the axes of the placed model
-        # On model, the lower right corner will be considered as the axis
-        # The Y coordinate needs to be reversed as in Unity, y (z) is forward
-
-        # User selects a region to be used for mapping
-        # TODO: Remove
-        if image_points is None:
-            image_points = get_four_points(image)
-        # else: The image below the vanishing line is used for mapping
+        # The image below the vanishing line is used for mapping
 
         model_points = transform.matrix_transform(image_points, H)
 
@@ -48,6 +41,8 @@ class CameraCalibration:
 
         plt.show()
 
+        # On model, the lower right corner will be considered as the axis
+        # The Y coordinate needs to be reversed as in Unity, y (z) is forward
         model_points = np.float64([[x[0], 0, h_warped - x[1]] for x in model_points])
 
         image_points = np.float64([[x] for x in image_points])
@@ -56,10 +51,6 @@ class CameraCalibration:
         tvec = np.zeros((3, 1))
 
         dist_coef = np.zeros(4)
-
-        # For writing these results to an output file
-        # TODO: There should be a single cam writer for all program
-        # camWriter = CameraParameterWriter()
 
         # From experiments, p3p seems like the best
         algorithms = {
@@ -71,11 +62,17 @@ class CameraCalibration:
             if k == "decomp":  # Decomposition version
                 _sol, rvec_sol, tvec_sol, nor_sol = cv2.decomposeHomographyMat(np.linalg.inv(H), K)
 
-            else:  # Pnp versions
-                _ret, rvec, tvec = cv2.solvePnP(model_points, image_points, K, dist_coef, flags=v)
+            else:  # Pnp solutions
+
+
+                _ret, rvec, tvec = cv2.solvePnP(model_points, image_points,
+                                                K, dist_coef,
+                                                flags=v)
                 if k == "iterative":
                     for iteration in range(100):
-                        _ret, rvec, tvec = cv2.solvePnP(model_points, image_points, K, dist_coef, rvec, tvec,
+                        _ret, rvec, tvec = cv2.solvePnP(model_points, image_points,
+                                                        K, dist_coef,
+                                                        rvec, tvec,
                                                         useExtrinsicGuess=True,
                                                         flags=v)
                 _sol = 1
@@ -148,9 +145,6 @@ class CameraCalibration:
                 # As the pnp gives us the object translation, we need to get the camera translation by transposing
                 rvec = np.transpose(rvec)
                 tvec = np.dot(-rvec, tvec)
-                print(k)
-                print("Rotation {}".format(rvec))
-                print("Translation {}".format(tvec))
 
                 if k == "decomp":
                     print("Normal {}".format(nvec))
@@ -165,3 +159,14 @@ class CameraCalibration:
                 CameraCalibration.camWriter.write("{} {} {} {} {} {} {} {} {} {} {} {} {} {}\n".format(*(rvec[:, 0]), *(rvec[:, 1]),
                                                                                      *(rvec[:, 2]), *tvec, w_warped,
                                                                                      h_warped))
+
+                print(k)
+                print("Rotation Rodrigues {}".format(rvec))
+
+                rvec, _ = cv2.Rodrigues(rvec)
+
+                rvec[0] = np.rad2deg(rvec[0])
+                rvec[1] = np.rad2deg(rvec[1])
+                rvec[2] = np.rad2deg(rvec[2])
+                print("Rotation Euler Angles {}".format(rvec))
+                print("Translation {}".format(tvec))
