@@ -406,13 +406,6 @@ class HorizonDetectorLib:
         left_vp = np.array(horizon[0])
         right_vp = np.array(horizon[1])
 
-        left_vp = np.array([0,6,1])
-        right_vp = np.array([4,6,1])
-        best_model = np.array([1,3,1])
-
-        horizon_homogenous = np.cross(left_vp, right_vp)
-        horizon_homogenous = horizon_homogenous / horizon_homogenous[2]
-
         v1_v2_len = np.linalg.norm(left_vp - right_vp)
         v1_zen_len = np.linalg.norm(left_vp- best_model)
         v2_zen_len = np.linalg.norm(right_vp - best_model)
@@ -431,10 +424,7 @@ class HorizonDetectorLib:
                            right_vp[1] * v2_angle +
                            best_model[1] * zenith_angle) / (v1_angle + v2_angle + zenith_angle)
 
-
-        # center_vp_dist = (np.linalg.norm(best_model[:2] - image_center[:2]))
         center_hor_dist = np.abs(np.dot(np.array(image_center), horizon_homogenous)) / np.linalg.norm(horizon_homogenous[:2])
-        # focal_length = np.sqrt(center_vp_dist * center_hor_dist)
 
         center_v1 = np.linalg.norm(image_center - left_vp)
         center_v2 = np.linalg.norm(image_center - right_vp)
