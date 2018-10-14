@@ -264,7 +264,6 @@ def compute_homography_and_warp(image, vp1, vp2, trajectories, corners, clip=Tru
     final_homography = np.dot(S, final_homography)
 
     # final_homography = np.eye(3)
-    final_homography = H
 
     warped_img = transform.warp(image, np.linalg.inv(final_homography),
                                 output_shape=(height, width))
@@ -349,15 +348,15 @@ def rectify_groundPlane(image_path, segmented_img_path, detection_data_file, fra
     #Obtain the postures of the pedestrian as lines too, to find the VP
     # Parameter : The sample taken every few frames can become a performance concern
     # TODO: Turn tracked pedestrian id's into parameters
-    pedestrian_posture_paths, pedestrian_postures = horizon_detector.HorizonDetectorLib.parse_pedestrian_detection(np.copy(image), detection_data_file, 15, use_bounding_boxes=False, returnPosture= True)
-    pedestrian_posture_paths_single, _ = horizon_detector.HorizonDetectorLib.parse_pedestrian_detection(np.copy(image), detection_data_file, 10, use_bounding_boxes=False, tracker_id=[56,17,10]) # Parameter
+    pedestrian_posture_paths, pedestrian_postures = horizon_detector.HorizonDetectorLib.parse_pedestrian_detection(np.copy(image), detection_data_file, 65, use_bounding_boxes=False, returnPosture= True)
+    pedestrian_posture_paths_single, _ = horizon_detector.HorizonDetectorLib.parse_pedestrian_detection(np.copy(image), detection_data_file, 5, use_bounding_boxes=False, tracker_id=[56,17,10]) # Parameter
 
     #If we assume the people doesn't change their velocities much
     #and calculate a homography between a path with multiple detections
 
     #These methods use bounding boxes
-    pedestrian_bb_paths, _ = horizon_detector.HorizonDetectorLib.parse_pedestrian_detection(np.copy(image), detection_data_file, 5)
-    trajectory_lines, _ = horizon_detector.HorizonDetectorLib.parse_pedestrian_detection(np.copy(image), detection_data_file, 5, False, True) # Parameter
+    pedestrian_bb_paths, _ = horizon_detector.HorizonDetectorLib.parse_pedestrian_detection(np.copy(image), detection_data_file, 30)
+    trajectory_lines, _ = horizon_detector.HorizonDetectorLib.parse_pedestrian_detection(np.copy(image), detection_data_file, 30, False, True) # Parameter
 
     # pedestrian_postures_image_lines = [np.concatenate((pedestrian_postures[j], image_lines[j]), axis=0)
     #                        for j in range(3)] UNUSED
@@ -369,15 +368,15 @@ def rectify_groundPlane(image_path, segmented_img_path, detection_data_file, fra
     # - Feet Trajectory + Hough Lines from the navigable area, RANSAC based
     # - Hough Lines from navigable area only
     vp_determination_methods = {
-        # 'posture': [pedestrian_posture_paths, False],
-        # 'single': [pedestrian_posture_paths_single, False],
+        'posture': [pedestrian_posture_paths, False],
+        'single': [pedestrian_posture_paths_single, False],
         'bb': [pedestrian_bb_paths, False],
-        # 'hough': [image_lines, True],
+        'hough': [image_lines, True],
         # 'trajectory': [trajectory_lines, True], DONT USE
-        # 'trajectory_hough': [[np.concatenate((trajectory_lines[j], image_lines[j]), axis=0)
-        #                       for j in range(3)] , True],
-        # 'postures_hough': [[np.concatenate((pedestrian_posture_paths[j], image_lines[j]), axis=0)
-        #                       for j in range(3)], True]
+        'trajectory_hough': [[np.concatenate((trajectory_lines[j], image_lines[j]), axis=0)
+                              for j in range(3)] , True],
+        'postures_hough': [[np.concatenate((pedestrian_posture_paths[j], image_lines[j]), axis=0)
+                              for j in range(3)], True]
     }
 
     row = 3
@@ -411,7 +410,10 @@ def rectify_groundPlane(image_path, segmented_img_path, detection_data_file, fra
             image_points = np.array([[0, height], [width, height], [width, 0], [0, 0]])
 
             #Find the focal_unity length from the triangle of vanishing points
-            zenith_vp, focal_length, center = horizon_detector.HorizonDetectorLib.ransac_zenith_vp(pedestrian_postures, horizon, [width/2, height/2, 1], zenith=zenith_vp)
+            zenith_vp, focal_length, center = horizon_detector.HorizonDetectorLib.ransac_zenith_vp(pedestrian_postures,
+                                                                                                   horizon,
+                                                                                                   [width/2,height/2,1],
+                                                                                                   zenith=zenith_vp)
             zenith_vp = zenith_vp / zenith_vp[2]
             fov = math.degrees(2 * math.atan2(height , (2 * focal_length)))
 
@@ -425,8 +427,8 @@ def rectify_groundPlane(image_path, segmented_img_path, detection_data_file, fra
 
             # Complete stratified approach that rectifies and translates the navigable area
             warped_result, model_points, H = compute_homography_and_warp(segmented_img,
-                                                                         [-1000, 293, 1],# list(leftVP),
-                                                                         [1000, 291, 1],# list(rightVP),
+                                                                         list(leftVP),
+                                                                         list(rightVP),
                                                                          trajectory_lines,
                                                                          image_points,
                                                                          clip=True,
