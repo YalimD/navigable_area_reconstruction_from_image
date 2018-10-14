@@ -377,7 +377,7 @@ class HorizonDetectorLib:
 
         # TODO: Delete, modified region
         horizon_homogenous = [-0.00000386579506, -0.00342122863,   1]
-        left_vp = np.array([0,(-horizon_homogenous[0] * 0 - horizon_homogenous[2]) / horizon_homogenous[1],1])
+        left_vp = np.array([00,((-horizon_homogenous[0] * 00) - horizon_homogenous[2]) / horizon_homogenous[1],1])
         right_vp = np.array([1000,(-horizon_homogenous[0] * 1000 - horizon_homogenous[2]) / horizon_homogenous[1],1])
 
         if best_model is None:

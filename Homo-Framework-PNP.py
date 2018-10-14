@@ -162,6 +162,8 @@ def compute_homography_and_warp(image, vp1, vp2, trajectories, corners, clip=Tru
         Image warped using homography as described above.
     """
 
+    final_homography = np.eye(3,3)
+
     height,width,_ = image.shape
 
     # Find Projective Transform
@@ -175,7 +177,6 @@ def compute_homography_and_warp(image, vp1, vp2, trajectories, corners, clip=Tru
 
     # for mean_intersection in intersections:
     A = np.eye(3, 3)
-    a = np.nan; b = np.nan
 
     if len(mean_intersection) > 0:
         a = mean_intersection[0]
@@ -184,11 +185,11 @@ def compute_homography_and_warp(image, vp1, vp2, trajectories, corners, clip=Tru
         A[0, 0] = 1 / b
         A[0, 1] = -a / b
 
-    H = np.dot(A, H)
+    final_homography = np.dot(A, H)
 
     # Find directions corresponding to vanishing points
-    v_post1 = np.dot(H, vp1) #Direction is found by multiplying with the projection matrix
-    v_post2 = np.dot(H, vp2)
+    v_post1 = np.dot(final_homography, vp1) #Direction is found by multiplying with the projection matrix
+    v_post2 = np.dot(final_homography, vp2)
 
     #Normalize
     v_post1 = v_post1 / np.sqrt(v_post1[0]**2 + v_post1[1]**2)
@@ -224,10 +225,10 @@ def compute_homography_and_warp(image, vp1, vp2, trajectories, corners, clip=Tru
     A = np.linalg.inv(A1)
 
     # Translate so that whole of the image is covered
-    inter_matrix = np.dot(A, H)
+    final_homography = np.dot(A, final_homography)
 
     #Cropping matrix
-    cords = np.dot(inter_matrix, [[0, 0, image.shape[1], image.shape[1]],
+    cords = np.dot(final_homography, [[0, 0, image.shape[1], image.shape[1]],
                                   [0, image.shape[0], 0, image.shape[0]],
                                   [1, 1, 1, 1]])
     cords = cords[:2] / cords[2]
@@ -254,7 +255,7 @@ def compute_homography_and_warp(image, vp1, vp2, trajectories, corners, clip=Tru
                   [0, 1, -ty],
                   [0, 0, 1]])
 
-    final_homography = np.dot(T, inter_matrix)
+    final_homography = np.dot(T, final_homography)
 
     S = np.array([[width / max_x , 0 ,0],
                  [0, height / max_y, 0],
@@ -263,6 +264,7 @@ def compute_homography_and_warp(image, vp1, vp2, trajectories, corners, clip=Tru
     final_homography = np.dot(S, final_homography)
 
     # final_homography = np.eye(3)
+    final_homography = H
 
     warped_img = transform.warp(image, np.linalg.inv(final_homography),
                                 output_shape=(height, width))
@@ -420,11 +422,11 @@ def rectify_groundPlane(image_path, segmented_img_path, detection_data_file, fra
             plot_axis.plot((zenith_vp[0]), (zenith_vp[1]), 'go')
             plot_axis.plot((center[0]), (center[1]), 'yo')
 
-        if False:
+
             # Complete stratified approach that rectifies and translates the navigable area
             warped_result, model_points, H = compute_homography_and_warp(segmented_img,
-                                                                         list(leftVP),
-                                                                         list(rightVP),
+                                                                         [-1000, 293, 1],# list(leftVP),
+                                                                         [1000, 291, 1],# list(rightVP),
                                                                          trajectory_lines,
                                                                          image_points,
                                                                          clip=True,
@@ -440,6 +442,8 @@ def rectify_groundPlane(image_path, segmented_img_path, detection_data_file, fra
 
 
             plt.imsave("warped_result_" + k +".png", warped_result)
+
+        if False:
 
             #------------ABONDEN DON'T USE--------------
             # My method using imaginary plane which utilizes 4 point approach
