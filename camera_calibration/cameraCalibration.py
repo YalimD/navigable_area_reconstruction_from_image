@@ -54,7 +54,11 @@ class CameraCalibration:
 
         # From experiments, p3p seems like the best
         algorithms = {
-            "p3p": cv2.SOLVEPNP_P3P}  # , "iterative": cv2.SOLVEPNP_ITERATIVE, "decomp": -1} #, "epnp": cv2.SOLVEPNP_EPNP}
+            "iterative": cv2.SOLVEPNP_ITERATIVE,
+            # "p3p": cv2.SOLVEPNP_P3P,
+            # "decomp": -1,
+            # "epnp": cv2.SOLVEPNP_EPNP
+        }
         # algorithms = { "decomp": -1}
 
         for v, k in enumerate(algorithms):

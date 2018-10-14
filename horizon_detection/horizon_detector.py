@@ -27,8 +27,8 @@ class HorizonDetectorLib:
         grayscale_img = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
         edges = feature.canny(grayscale_img, 3)
         # Parameter: Parameter
-        line_segments = transform.probabilistic_hough_line(edges, line_length=100,
-                                                   line_gap=30)
+        line_segments = transform.probabilistic_hough_line(edges,   line_length=100,
+                                                                    line_gap=30)
 
         # Edge detection (canny for now)
         # grayscale_img = cv2.Canny(grayscale_img, threshold1=75, threshold2=200, apertureSize=3)
@@ -290,7 +290,7 @@ class HorizonDetectorLib:
             plot_axis.plot(vp1[0], vp1[1], 'bo')
 
             # Before determining the second VP, remove inliers as they already contributed to first VP
-            path_lines_reduced = HorizonDetectorLib.remove_inliers(vp1, path_lines, 30)
+            path_lines_reduced = HorizonDetectorLib.remove_inliers(vp1, path_lines, 60)
 
             # Find second vanishing point
             model2 = HorizonDetectorLib.ransac_vanishing_point(path_lines_reduced)
@@ -299,7 +299,7 @@ class HorizonDetectorLib:
 
             # Test if we can find the zenith vanishing point
             # Before determining the second VP, remove inliers as they already contributed to first VP
-            path_lines_reduced_again = HorizonDetectorLib.remove_inliers(vp2, path_lines_reduced, 60)
+            path_lines_reduced_again = HorizonDetectorLib.remove_inliers(vp2, path_lines_reduced, 30)
 
             # Find second vanishing point
             model3 = HorizonDetectorLib.ransac_vanishing_point(path_lines_reduced_again)
@@ -401,51 +401,46 @@ class HorizonDetectorLib:
                     # logging.info("Current best model has {} votes at iteration {}".format(
                     #     current_votes.sum(), ransac_iter))
 
-        old = False
-        if not old:
-            # The image center  should be the orthocenter of the triangle
-            left_vp = np.array(horizon[0])
-            right_vp = np.array(horizon[1])
 
-            v1_z = np.cross(best_model, left_vp)
-            v1_z = v1_z / v1_z[2]
-            v2_z = np.cross(best_model, right_vp)
-            v2_z = v2_z / v2_z[2]
+        # The image center  should be the orthocenter of the triangle
+        left_vp = np.array(horizon[0])
+        right_vp = np.array(horizon[1])
 
-            v1_v2_len = np.linalg.norm(left_vp[:2] - right_vp[:2])
-            v1_zen_len = np.linalg.norm(left_vp[:2] - best_model[:2])
-            v2_zen_len = np.linalg.norm(right_vp[:2] - best_model[:2])
+        left_vp = np.array([0,6,1])
+        right_vp = np.array([4,6,1])
+        best_model = np.array([1,3,1])
 
-            v1_angle = np.tan(np.arccos(np.dot(horizon_homogenous, v1_z) / (v1_v2_len * v1_zen_len)))
-            v2_angle = np.tan(np.arccos(np.dot(horizon_homogenous, v2_z) / (v1_v2_len * v2_zen_len)))
-            zenith_angle = np.tan(np.arccos(np.dot(v1_z, v2_z) / (v1_zen_len * v2_zen_len)))
+        horizon_homogenous = np.cross(left_vp, right_vp)
+        horizon_homogenous = horizon_homogenous / horizon_homogenous[2]
 
-            image_center = [0,0,1]
+        v1_v2_len = np.linalg.norm(left_vp - right_vp)
+        v1_zen_len = np.linalg.norm(left_vp- best_model)
+        v2_zen_len = np.linalg.norm(right_vp - best_model)
 
-            image_center[0] = (left_vp[0] * v1_angle +
-                               right_vp[0] * v2_angle +
-                               best_model[0] * zenith_angle) / (v1_angle + v2_angle + zenith_angle)
+        v1_angle = np.tan(np.arccos(np.dot(right_vp - left_vp, best_model - left_vp) / (v1_zen_len * v1_v2_len)))
+        v2_angle = np.tan(np.arccos(np.dot(left_vp - right_vp, best_model - right_vp) / (v2_zen_len * v1_v2_len)))
+        zenith_angle = np.tan(np.arccos(np.dot(right_vp - best_model, left_vp- best_model) / (v1_zen_len * v2_zen_len)))
 
-            image_center[1] = (left_vp[1] * v1_angle +
-                               right_vp[1] * v2_angle +
-                               best_model[1] * zenith_angle) / (v1_angle + v2_angle + zenith_angle)
+        image_center = [0,0,1]
+
+        image_center[0] = (left_vp[0] * v1_angle +
+                           right_vp[0] * v2_angle +
+                           best_model[0] * zenith_angle) / (v1_angle + v2_angle + zenith_angle)
+
+        image_center[1] = (left_vp[1] * v1_angle +
+                           right_vp[1] * v2_angle +
+                           best_model[1] * zenith_angle) / (v1_angle + v2_angle + zenith_angle)
 
 
-            # center_vp_dist = (np.linalg.norm(best_model[:2] - image_center[:2]))
-            center_hor_dist = np.abs(np.dot(np.array(image_center), horizon_homogenous)) / np.linalg.norm(horizon_homogenous[:2])
-            # focal_length = np.sqrt(center_vp_dist * center_hor_dist)
+        # center_vp_dist = (np.linalg.norm(best_model[:2] - image_center[:2]))
+        center_hor_dist = np.abs(np.dot(np.array(image_center), horizon_homogenous)) / np.linalg.norm(horizon_homogenous[:2])
+        # focal_length = np.sqrt(center_vp_dist * center_hor_dist)
 
-            center_v1 = np.linalg.norm(image_center - left_vp)
-            center_v2 = np.linalg.norm(image_center - right_vp)
+        center_v1 = np.linalg.norm(image_center - left_vp)
+        center_v2 = np.linalg.norm(image_center - right_vp)
 
-            focal_length = np.sqrt(np.abs((np.sqrt(center_v1 ** 2 - center_hor_dist ** 2))*(np.sqrt(center_v2 ** 2 - center_hor_dist ** 2))
-                                   - (center_hor_dist ** 2)))
-
-        # Old way of calculating the focal length
-        if old:
-            center_vp_dist = (np.linalg.norm(best_model[:2] - image_center[:2]))
-            center_hor_dist = np.dot(np.array(image_center), horizon_homogenous)
-            focal_length = np.sqrt(center_vp_dist * center_hor_dist)
+        focal_length = np.sqrt(np.abs((np.sqrt(center_v1 ** 2 - center_hor_dist ** 2))*(np.sqrt(center_v2 ** 2 - center_hor_dist ** 2))
+                               - (center_hor_dist ** 2)))
 
         return best_model, focal_length, image_center
 

@@ -132,7 +132,14 @@ def extract_circular_points(trajectory_lines, P, method):
 
     return intersections, mean_intersection
 
-def compute_homography_and_warp(image, vp1, vp2, trajectories, corners, clip=True, clip_factor=3, method="posture"):
+def compute_homography_and_warp(image,
+                                vp1, vp2,
+                                trajectories,
+                                corners,
+                                clip=True, clip_factor=3, method="posture"):
+
+    # TODO: Method parameter is useless
+
     """Compute homography from vanishing points and warp the image.
 
     It is assumed that vp1 and vp2 correspond to horizontal and vertical
@@ -349,7 +356,7 @@ def rectify_groundPlane(image_path, segmented_img_path, detection_data_file, fra
     # Parameter : The sample taken every few frames can become a performance concern
     # TODO: Turn tracked pedestrian id's into parameters
     pedestrian_posture_paths, pedestrian_postures = horizon_detector.HorizonDetectorLib.parse_pedestrian_detection(np.copy(image), detection_data_file, 65, use_bounding_boxes=False, returnPosture= True)
-    pedestrian_posture_paths_single, _ = horizon_detector.HorizonDetectorLib.parse_pedestrian_detection(np.copy(image), detection_data_file, 5, use_bounding_boxes=False, tracker_id=[56,17,10]) # Parameter
+    pedestrian_posture_paths_single, _ = horizon_detector.HorizonDetectorLib.parse_pedestrian_detection(np.copy(image), detection_data_file, 5, use_bounding_boxes=False, tracker_id=[56,17,36,44]) # Parameter
 
     #If we assume the people doesn't change their velocities much
     #and calculate a homography between a path with multiple detections
@@ -368,13 +375,13 @@ def rectify_groundPlane(image_path, segmented_img_path, detection_data_file, fra
     # - Feet Trajectory + Hough Lines from the navigable area, RANSAC based
     # - Hough Lines from navigable area only
     vp_determination_methods = {
-        'posture': [pedestrian_posture_paths, False],
-        'single': [pedestrian_posture_paths_single, False],
-        'bb': [pedestrian_bb_paths, False],
-        'hough': [image_lines, True],
-        # 'trajectory': [trajectory_lines, True], DONT USE
-        'trajectory_hough': [[np.concatenate((trajectory_lines[j], image_lines[j]), axis=0)
-                              for j in range(3)] , True],
+        # 'posture': [pedestrian_posture_paths, False],
+        # 'single': [pedestrian_posture_paths_single, False],
+        # 'bb': [pedestrian_bb_paths, False],
+        # 'hough': [image_lines, True],
+        # # 'trajectory': [trajectory_lines, True], DONT USE
+        # 'trajectory_hough': [[np.concatenate((trajectory_lines[j], image_lines[j]), axis=0)
+        #                       for j in range(3)] , True],
         'postures_hough': [[np.concatenate((pedestrian_posture_paths[j], image_lines[j]), axis=0)
                               for j in range(3)], True]
     }
@@ -416,7 +423,7 @@ def rectify_groundPlane(image_path, segmented_img_path, detection_data_file, fra
                                                                                                    zenith=zenith_vp)
             zenith_vp = zenith_vp / zenith_vp[2]
             fov = math.degrees(2 * math.atan2(height , (2 * focal_length)))
-
+            focal_length = height * (1 / np.tan(np.deg2rad(fov / 2))) / 2
             print("Method: {}, left: {}, right: {}".format(k,leftVP[:2],rightVP[:2]))
             print("Zenith: {}, focal: {} with fov: {}".format(zenith_vp[:2], focal_length, fov))
 
@@ -424,65 +431,63 @@ def rectify_groundPlane(image_path, segmented_img_path, detection_data_file, fra
             plot_axis.plot((zenith_vp[0]), (zenith_vp[1]), 'go')
             plot_axis.plot((center[0]), (center[1]), 'yo')
 
+            if True:
+                # Complete stratified approach that rectifies and translates the navigable area
+                warped_result, model_points, H = compute_homography_and_warp(segmented_img,
+                                                                             list(leftVP),
+                                                                             list(rightVP),
+                                                                             trajectory_lines,
+                                                                             image_points,
+                                                                             clip=True,
+                                                                             clip_factor=3,
+                                                                             method=k)
+                plot_axis = rectified_axis[i//col, i % col]
+                plot_axis.set_title(str(k))
+                plot_axis.imshow(warped_result)
 
-            # Complete stratified approach that rectifies and translates the navigable area
-            warped_result, model_points, H = compute_homography_and_warp(segmented_img,
-                                                                         list(leftVP),
-                                                                         list(rightVP),
-                                                                         trajectory_lines,
-                                                                         image_points,
-                                                                         clip=True,
-                                                                         clip_factor=3,
-                                                                         method=k)
-            plot_axis = rectified_axis[i//col, i % col]
-            plot_axis.set_title(str(k))
-            plot_axis.imshow(warped_result)
-
-            for i in range(len(model_points)):
-                plot_axis.plot([model_points[i][0], model_points[(i + 1) % 4][0]],
-                         [model_points[i][1], model_points[(i + 1) % 4][1]], 'b')
+                for i in range(len(model_points)):
+                    plot_axis.plot([model_points[i][0], model_points[(i + 1) % 4][0]],
+                             [model_points[i][1], model_points[(i + 1) % 4][1]], 'b')
 
 
-            plt.imsave("warped_result_" + k +".png", warped_result)
+                plt.imsave("warped_result_" + k +".png", warped_result)
 
-        if False:
+                #------------ABONDEN DON'T USE--------------
+                # My method using imaginary plane which utilizes 4 point approach
+                # allignedImg, leftVP, rightVP, alligned_corners = allignHorizon(segmented_img, horizon)
+                # warped_result, model_points, H = applyParametretizedHomography(allignedImg, list(leftVP), list(rightVP), alligned_corners, k)
+                # ------------------------------------------
 
-            #------------ABONDEN DON'T USE--------------
-            # My method using imaginary plane which utilizes 4 point approach
-            # allignedImg, leftVP, rightVP, alligned_corners = allignHorizon(segmented_img, horizon)
-            # warped_result, model_points, H = applyParametretizedHomography(allignedImg, list(leftVP), list(rightVP), alligned_corners, k)
-            # ------------------------------------------
+                #Intrinsic matrix for camera, same for both model (rectification camera) and scene camera
+                K = np.array([[focal_length,0,warped_result.shape[1]/2],
+                             [0,focal_length,warped_result.shape[0]/2],
+                             [0,0,1]])
 
-            #Intrinsic matrix for camera, same for both model (rectification camera) and scene camera
-            K = np.array([[focal_length,0,warped_result.shape[1]/2],
-                         [0,focal_length,warped_result.shape[0]/2],
-                         [0,0,1]])
+                #Output the internal and external parameters through a text file
+                # Using the p3p methods, map the model points to image points
+                #TODO: Has concepts from:
+                #   Ezio Malis, Manuel Vargas, and others. Deeper understanding of the homography decomposition for vision-based control. 2007.
 
-            #Output the internal and external parameters through a text file
-            # Using the p3p methods, map the model points to image points
-            #TODO: Has concepts from:
-            #   Ezio Malis, Manuel Vargas, and others. Deeper understanding of the homography decomposition for vision-based control. 2007.
+                corners_homo = [[*corner, 1] for corner in image_points]
 
-            corners_homo = [[*corner, 1] for corner in image_points]
+                left_border = np.cross(corners_homo[0], corners_homo[3])
+                right_border = np.cross(corners_homo[1], corners_homo[2])
+                right_border = right_border / right_border[2]
 
-            left_border = np.cross(corners_homo[0], corners_homo[3])
-            right_border = np.cross(corners_homo[1], corners_homo[2])
-            right_border = right_border / right_border[2]
+                horizon_line = np.cross(horizon[0], horizon[1])
 
-            horizon_line = np.cross(horizon[0], horizon[1])
+                corners_homo[0] = np.cross(left_border, horizon_line)
+                image_points[3] = (corners_homo[0] / corners_homo[0][2])[:2]
+                corners_homo[1] = np.cross(right_border, horizon_line)
+                image_points[2] = (corners_homo[1] / corners_homo[1][2])[:2]
 
-            corners_homo[0] = np.cross(left_border, horizon_line)
-            image_points[3] = (corners_homo[0] / corners_homo[0][2])[:2]
-            corners_homo[1] = np.cross(right_border, horizon_line)
-            image_points[2] = (corners_homo[1] / corners_homo[1][2])[:2]
+                image_points = [[pnt[0], max(0,pnt[1])] for pnt in image_points]
 
-            image_points = [[pnt[0], max(0,pnt[1])] for pnt in image_points]
-
-            cameraCalibration.CameraCalibration.extractCameraParameters(image,
-                                                                        warped_result,
-                                                                        model_points,
-                                                                        image_points,
-                                                                        K, H)
+                cameraCalibration.CameraCalibration.extractCameraParameters(image,
+                                                                            warped_result,
+                                                                            model_points,
+                                                                            image_points,
+                                                                            K, H)
 
     plt.show(horizon_fig)
     plt.show(rectified_fig)
