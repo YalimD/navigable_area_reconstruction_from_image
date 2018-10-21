@@ -1,12 +1,11 @@
 import cv2
 import numpy as np
 import matplotlib.pyplot as plt
-from sklearn import linear_model
+from matplotlib.pyplot import ion
 import skimage.transform as transform
 import math
 import argparse
 
-import camera_calibration
 from horizon_detection import horizon_detector
 from camera_calibration import cameraCalibration
 
@@ -275,25 +274,24 @@ def compute_homography_and_warp(image,
     warped_img = transform.warp(image, np.linalg.inv(final_homography),
                                 output_shape=(height, width))
 
-
     transformed_corners = transform.matrix_transform(corners, final_homography)
 
     return warped_img, transformed_corners, final_homography
 
-
+#region ground_truth_determination
 def mouse_handler(event, x, y, flags, data):
 
     if event == cv2.EVENT_LBUTTONDOWN:
-
         if len(data) < 8:
             data['points'].append([x, y, 1])
             cv2.circle(data['image'], (x, y), 3, (0, 0, 255), 5, 16)
             cv2.imshow(data['windowName'], data['image'])
 
-def determineCross(line1, line2):
+# Finds the normalized cross product of two elements in homogenous coordinates
+def determineCross(elem1, elem2):
 
-    cross = np.cross(line1, line2)
-    return cross / cross[2]
+    c = np.cross(elem1, elem2)
+    return c / c[2]
 
 def processPoints(data):
 
@@ -316,15 +314,20 @@ def processPoints(data):
 
     return vanishing
 
+# endregion
+
 
 #Main method that is used to rectify the ground plane
-def rectify_groundPlane(image_path, segmented_img_path, detection_data_file, frames_per_check, ground_truth_horizon, draw_features):
+def rectify_groundPlane(image_path,
+                        segmented_img_path,
+                        detection_data_file,
+                        frames_per_check,
+                        ground_truth_horizon,
+                        draw_features):
 
     # Manuel testing debugging part:
     image = cv2.imread(image_path)
     segmented_img = cv2.imread(segmented_img_path)
-
-
 
     if ground_truth_horizon is None:
         clicked_points = {}
@@ -350,20 +353,35 @@ def rectify_groundPlane(image_path, segmented_img_path, detection_data_file, fra
     # Extract the lines from the whole image
     image_lines = horizon_detector.HorizonDetectorLib.extract_image_lines(image)
 
-    #Extract the pedestrian paths as lines (postures or bounding boxes)
+    # Extract the pedestrian paths as lines (postures or bounding boxes)
 
-    #Obtain the postures of the pedestrian as lines too, to find the VP
-    # Parameter : The sample taken every few frames can become a performance concern
+    # Obtain the postures of the pedestrian as lines too, to find the VP
+    # The sample taken every few frames can become a performance concern
     # TODO: Turn tracked pedestrian id's into parameters
-    pedestrian_posture_paths, pedestrian_postures = horizon_detector.HorizonDetectorLib.parse_pedestrian_detection(np.copy(image), detection_data_file, 65, use_bounding_boxes=False, returnPosture= True)
-    pedestrian_posture_paths_single, _ = horizon_detector.HorizonDetectorLib.parse_pedestrian_detection(np.copy(image), detection_data_file, 5, use_bounding_boxes=False, tracker_id=[56,17,36,44]) # Parameter
+    pedestrian_posture_paths, pedestrian_postures = horizon_detector.HorizonDetectorLib.parse_pedestrian_detection(np.copy(image),
+                                                                                                                   detection_data_file,
+                                                                                                                   65,
+                                                                                                                   use_bounding_boxes=False,
+                                                                                                                   returnPosture= True) # Parameter
+
+    pedestrian_posture_paths_single, _ = horizon_detector.HorizonDetectorLib.parse_pedestrian_detection(np.copy(image),
+                                                                                                        detection_data_file,
+                                                                                                        5,
+                                                                                                        use_bounding_boxes=False,
+                                                                                                        tracker_id=[17,10,56]) # Parameter
 
     #If we assume the people doesn't change their velocities much
     #and calculate a homography between a path with multiple detections
 
     #These methods use bounding boxes
-    pedestrian_bb_paths, _ = horizon_detector.HorizonDetectorLib.parse_pedestrian_detection(np.copy(image), detection_data_file, 30)
-    trajectory_lines, _ = horizon_detector.HorizonDetectorLib.parse_pedestrian_detection(np.copy(image), detection_data_file, 30, False, True) # Parameter
+    pedestrian_bb_paths, _ = horizon_detector.HorizonDetectorLib.parse_pedestrian_detection(np.copy(image),
+                                                                                            detection_data_file,
+                                                                                            30)
+    trajectory_lines, _ = horizon_detector.HorizonDetectorLib.parse_pedestrian_detection(np.copy(image),
+                                                                                         detection_data_file,
+                                                                                         30,
+                                                                                         use_bounding_boxes = False,
+                                                                                         feet_only = True) # Parameter
 
     # pedestrian_postures_image_lines = [np.concatenate((pedestrian_postures[j], image_lines[j]), axis=0)
     #                        for j in range(3)] UNUSED
@@ -391,6 +409,7 @@ def rectify_groundPlane(image_path, segmented_img_path, detection_data_file, fra
     horizon_fig, horizon_axis = plt.subplots(row, col)
     rectified_fig, rectified_axis = plt.subplots(row,col)
     height,width, _ = image.shape
+    # ion()
 
     for i, k in enumerate(vp_determination_methods):
 
@@ -419,11 +438,15 @@ def rectify_groundPlane(image_path, segmented_img_path, detection_data_file, fra
             #Find the focal_unity length from the triangle of vanishing points
             zenith_vp, focal_length, center = horizon_detector.HorizonDetectorLib.ransac_zenith_vp(pedestrian_postures,
                                                                                                    horizon,
-                                                                                                   [width/2,height/2,1],
+                                                                                                   [width/2, height/2, 1],
                                                                                                    zenith=zenith_vp)
             zenith_vp = zenith_vp / zenith_vp[2]
+
             fov = math.degrees(2 * math.atan2(height , (2 * focal_length)))
+
+            # Just to validate the fov/focal_length calculation
             focal_length = height * (1 / np.tan(np.deg2rad(fov / 2))) / 2
+
             print("Method: {}, left: {}, right: {}".format(k,leftVP[:2],rightVP[:2]))
             print("Zenith: {}, focal: {} with fov: {}".format(zenith_vp[:2], focal_length, fov))
 
@@ -431,63 +454,62 @@ def rectify_groundPlane(image_path, segmented_img_path, detection_data_file, fra
             plot_axis.plot((zenith_vp[0]), (zenith_vp[1]), 'go')
             plot_axis.plot((center[0]), (center[1]), 'yo')
 
+
+            # Complete stratified approach that rectifies and translates the navigable area
+            warped_result, model_points, H = compute_homography_and_warp(segmented_img,
+                                                                         list(leftVP),
+                                                                         list(rightVP),
+                                                                         trajectory_lines,
+                                                                         image_points,
+                                                                         clip=True,
+                                                                         clip_factor=3,
+                                                                         method=k)
+            plot_axis = rectified_axis[i//col, i % col]
+            plot_axis.set_title(str(k))
+            plot_axis.imshow(warped_result)
+
+
+            for i in range(len(model_points)):
+                plot_axis.plot([model_points[i][0], model_points[(i + 1) % 4][0]],
+                         [model_points[i][1], model_points[(i + 1) % 4][1]], 'b')
+
+            plt.imsave("warped_result_" + k +".png", warped_result)
+
+            #Intrinsic matrix for camera, same for both model (rectification camera) and scene camera
+            intrinsic = np.array([[focal_length,0,warped_result.shape[1]/2],
+                         [0,focal_length,warped_result.shape[0]/2],
+                         [0,0,1]])
+
+            #Output the internal and external parameters through a text file
+            # Using the p3p methods, map the model points to image points
+            #TODO: Has concepts from:
+            #   Ezio Malis, Manuel Vargas, and others. Deeper understanding of the homography decomposition for vision-based control. 2007.
+
+
+            # Determine the region under the horizon in the image
+            #  TODO: I think this is unnecessary
+            corners_homo = [[*corner, 1] for corner in image_points]
+
+            left_border = np.cross(corners_homo[0], corners_homo[3])
+            right_border = np.cross(corners_homo[1], corners_homo[2])
+            right_border = right_border / right_border[2]
+
+            horizon_line = np.cross(horizon[0], horizon[1])
+
+            corners_homo[0] = np.cross(left_border, horizon_line)
+            image_points[3] = (corners_homo[0] / corners_homo[0][2])[:2]
+            corners_homo[1] = np.cross(right_border, horizon_line)
+            image_points[2] = (corners_homo[1] / corners_homo[1][2])[:2]
+
+            image_points = [[pnt[0], max(0,pnt[1])] for pnt in image_points]
+
             if True:
-                # Complete stratified approach that rectifies and translates the navigable area
-                warped_result, model_points, H = compute_homography_and_warp(segmented_img,
-                                                                             list(leftVP),
-                                                                             list(rightVP),
-                                                                             trajectory_lines,
-                                                                             image_points,
-                                                                             clip=True,
-                                                                             clip_factor=3,
-                                                                             method=k)
-                plot_axis = rectified_axis[i//col, i % col]
-                plot_axis.set_title(str(k))
-                plot_axis.imshow(warped_result)
-
-                for i in range(len(model_points)):
-                    plot_axis.plot([model_points[i][0], model_points[(i + 1) % 4][0]],
-                             [model_points[i][1], model_points[(i + 1) % 4][1]], 'b')
-
-
-                plt.imsave("warped_result_" + k +".png", warped_result)
-
-                #------------ABONDEN DON'T USE--------------
-                # My method using imaginary plane which utilizes 4 point approach
-                # allignedImg, leftVP, rightVP, alligned_corners = allignHorizon(segmented_img, horizon)
-                # warped_result, model_points, H = applyParametretizedHomography(allignedImg, list(leftVP), list(rightVP), alligned_corners, k)
-                # ------------------------------------------
-
-                #Intrinsic matrix for camera, same for both model (rectification camera) and scene camera
-                K = np.array([[focal_length,0,warped_result.shape[1]/2],
-                             [0,focal_length,warped_result.shape[0]/2],
-                             [0,0,1]])
-
-                #Output the internal and external parameters through a text file
-                # Using the p3p methods, map the model points to image points
-                #TODO: Has concepts from:
-                #   Ezio Malis, Manuel Vargas, and others. Deeper understanding of the homography decomposition for vision-based control. 2007.
-
-                corners_homo = [[*corner, 1] for corner in image_points]
-
-                left_border = np.cross(corners_homo[0], corners_homo[3])
-                right_border = np.cross(corners_homo[1], corners_homo[2])
-                right_border = right_border / right_border[2]
-
-                horizon_line = np.cross(horizon[0], horizon[1])
-
-                corners_homo[0] = np.cross(left_border, horizon_line)
-                image_points[3] = (corners_homo[0] / corners_homo[0][2])[:2]
-                corners_homo[1] = np.cross(right_border, horizon_line)
-                image_points[2] = (corners_homo[1] / corners_homo[1][2])[:2]
-
-                image_points = [[pnt[0], max(0,pnt[1])] for pnt in image_points]
-
-                cameraCalibration.CameraCalibration.extractCameraParameters(image,
+                cameraCalibration.CameraCalibration.extractCameraParameters(k,
+                                                                            image,
                                                                             warped_result,
                                                                             model_points,
                                                                             image_points,
-                                                                            K, H)
+                                                                            intrinsic, H)
 
     plt.show(horizon_fig)
     plt.show(rectified_fig)
@@ -496,6 +518,7 @@ def rectify_groundPlane(image_path, segmented_img_path, detection_data_file, fra
 # - Have a through test with all videos, coupled with Unity
 # - We will also show the stratified approach, so be sure to document it good as well,
 # - When writing, read about pnp as it is used for placement
+# Then read other horizon detections for comparison
 if __name__ == "__main__":
     print("Welcome to the perspective corrector")
 

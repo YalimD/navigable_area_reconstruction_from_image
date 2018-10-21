@@ -230,6 +230,47 @@ class HorizonDetectorLib:
         return lines
 
 
+    # Takes horizon vertices and zenith vp in homogenous coordinates
+    # Finds the focal length using the orthocenter of the triangle defined
+    # by VP's.
+    @staticmethod
+    def find_focal_length(horizon, zenith):
+
+        left_vp = np.array(horizon[0])
+        right_vp = np.array(horizon[1])
+
+        horizon_homogenous = np.cross(left_vp, right_vp)
+
+        v1_v2_len = np.linalg.norm(left_vp - right_vp)
+        v1_zen_len = np.linalg.norm(left_vp - zenith)
+        v2_zen_len = np.linalg.norm(right_vp - zenith)
+
+        v1_angle = np.tan(np.arccos(np.dot(right_vp - left_vp, zenith - left_vp) / (v1_zen_len * v1_v2_len)))
+        v2_angle = np.tan(np.arccos(np.dot(left_vp - right_vp, zenith - right_vp) / (v2_zen_len * v1_v2_len)))
+        zenith_angle = np.tan(np.arccos(np.dot(right_vp - zenith, left_vp - zenith) / (v1_zen_len * v2_zen_len)))
+
+        image_center = [0, 0, 1]
+
+        image_center[0] = (left_vp[0] * v1_angle +
+                           right_vp[0] * v2_angle +
+                           zenith[0] * zenith_angle) / (v1_angle + v2_angle + zenith_angle)
+
+        image_center[1] = (left_vp[1] * v1_angle +
+                           right_vp[1] * v2_angle +
+                           zenith[1] * zenith_angle) / (v1_angle + v2_angle + zenith_angle)
+
+        center_hor_dist = np.abs(np.dot(np.array(image_center), horizon_homogenous)) / np.linalg.norm(
+            horizon_homogenous[:2])
+
+        center_v1 = np.linalg.norm(image_center - left_vp)
+        center_v2 = np.linalg.norm(image_center - right_vp)
+
+        focal_length = np.sqrt(
+            np.abs((np.sqrt(center_v1 ** 2 - center_hor_dist ** 2)) * (np.sqrt(center_v2 ** 2 - center_hor_dist ** 2))
+                   - (center_hor_dist ** 2)))
+
+        return focal_length
+
     # Determines the vanishing points on horizon using information coming from pedestrian paths
     # OR uses the trajectory information and/or edges from the image to detect vanishing points
     # which will determine the horizon
@@ -290,7 +331,7 @@ class HorizonDetectorLib:
             plot_axis.plot(vp1[0], vp1[1], 'bo')
 
             # Before determining the second VP, remove inliers as they already contributed to first VP
-            path_lines_reduced = HorizonDetectorLib.remove_inliers(vp1, path_lines, 60)
+            path_lines_reduced = HorizonDetectorLib.remove_inliers(vp1, path_lines, 30)
 
             # Find second vanishing point
             model2 = HorizonDetectorLib.ransac_vanishing_point(path_lines_reduced)
@@ -299,7 +340,7 @@ class HorizonDetectorLib:
 
             # Test if we can find the zenith vanishing point
             # Before determining the second VP, remove inliers as they already contributed to first VP
-            path_lines_reduced_again = HorizonDetectorLib.remove_inliers(vp2, path_lines_reduced, 30)
+            path_lines_reduced_again = HorizonDetectorLib.remove_inliers(vp2, path_lines_reduced, 60)
 
             # Find second vanishing point
             model3 = HorizonDetectorLib.ransac_vanishing_point(path_lines_reduced_again)
@@ -339,7 +380,7 @@ class HorizonDetectorLib:
 
         s = 0
         for i in range(len(gt_Y)):
-            s += ((line_Y[i] - gt_Y[i]) ** 2)
+            s += (abs(line_Y[i] - gt_Y[i]) ** 1)
         r_mse = np.sqrt(s / len(gt_Y))
 
         return [vp_left, vp_right, vp_zenith, r_mse]
@@ -401,38 +442,11 @@ class HorizonDetectorLib:
                     # logging.info("Current best model has {} votes at iteration {}".format(
                     #     current_votes.sum(), ransac_iter))
 
+        # Calculate the focal length
+        zenith = best_model
+        focal_length = HorizonDetectorLib.find_focal_length(horizon, zenith)
 
-        # The image center  should be the orthocenter of the triangle
-        left_vp = np.array(horizon[0])
-        right_vp = np.array(horizon[1])
-
-        v1_v2_len = np.linalg.norm(left_vp - right_vp)
-        v1_zen_len = np.linalg.norm(left_vp- best_model)
-        v2_zen_len = np.linalg.norm(right_vp - best_model)
-
-        v1_angle = np.tan(np.arccos(np.dot(right_vp - left_vp, best_model - left_vp) / (v1_zen_len * v1_v2_len)))
-        v2_angle = np.tan(np.arccos(np.dot(left_vp - right_vp, best_model - right_vp) / (v2_zen_len * v1_v2_len)))
-        zenith_angle = np.tan(np.arccos(np.dot(right_vp - best_model, left_vp- best_model) / (v1_zen_len * v2_zen_len)))
-
-        image_center = [0,0,1]
-
-        image_center[0] = (left_vp[0] * v1_angle +
-                           right_vp[0] * v2_angle +
-                           best_model[0] * zenith_angle) / (v1_angle + v2_angle + zenith_angle)
-
-        image_center[1] = (left_vp[1] * v1_angle +
-                           right_vp[1] * v2_angle +
-                           best_model[1] * zenith_angle) / (v1_angle + v2_angle + zenith_angle)
-
-        center_hor_dist = np.abs(np.dot(np.array(image_center), horizon_homogenous)) / np.linalg.norm(horizon_homogenous[:2])
-
-        center_v1 = np.linalg.norm(image_center - left_vp)
-        center_v2 = np.linalg.norm(image_center - right_vp)
-
-        focal_length = np.sqrt(np.abs((np.sqrt(center_v1 ** 2 - center_hor_dist ** 2))*(np.sqrt(center_v2 ** 2 - center_hor_dist ** 2))
-                               - (center_hor_dist ** 2)))
-
-        return best_model, focal_length, image_center
+        return zenith, focal_length, image_center
 
     @staticmethod
     def ransac_vanishing_point(edgelets, num_ransac_iter=2000, threshold_inlier=5):
