@@ -1,7 +1,7 @@
 import cv2
 import numpy as np
 import math
-import matplotlib.lines as lines
+import sys
 
 from sklearn import linear_model
 from skimage import transform, feature
@@ -27,8 +27,8 @@ class HorizonDetectorLib:
         grayscale_img = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
         edges = feature.canny(grayscale_img, 3)
         # Parameter: Parameter
-        line_segments = transform.probabilistic_hough_line(edges,   line_length=100,
-                                                                    line_gap=30)
+        line_segments = transform.probabilistic_hough_line(edges,   line_length=20,
+                                                                    line_gap=10)
 
         # Edge detection (canny for now)
         # grayscale_img = cv2.Canny(grayscale_img, threshold1=75, threshold2=200, apertureSize=3)
@@ -80,7 +80,6 @@ class HorizonDetectorLib:
                     num_of_frames += 1
 
 
-                # if num_of_frames % frames_per_check == 0 and (tracker_id is None or (tracker_id is not None and int(agent[1]) in tracker_id)):
                 if (agent[1] not in latest_loc.keys() or num_of_frames - (latest_loc[agent[1]])[2] >= frames_per_check) \
                         and (tracker_id is None or (int(agent[1]) in tracker_id)):
 
@@ -198,7 +197,8 @@ class HorizonDetectorLib:
         # Taken from https://github.com/chsasank/Image-Rectification
         # The direction vectors are normalized for easier calculation afterwards
         if len(line_directions) > 0:
-            line_directions = np.array(line_directions) / np.linalg.norm(line_directions, axis=1)[:, np.newaxis]
+            line_directions = np.array(line_directions) / \
+                              (np.linalg.norm(line_directions, axis=1)[:, np.newaxis] + sys.float_info.epsilon)
 
         # cv2.imshow("Extracted Lines", image)
         # cv2.waitKey(0)
@@ -276,7 +276,9 @@ class HorizonDetectorLib:
     # which will determine the horizon
     # TODO: Parameters for thresholds
     @staticmethod
-    def determineVP(path_lines, image, plot_axis, ground_truth, asTrajectory=False,  draw_features = False):
+    def determineVP(path_lines, image, plot_axis, ground_truth,
+                    asTrajectory=False,  draw_features = False):
+
         centers, directions, strengths = path_lines
 
         # Draw the path lines
@@ -330,6 +332,7 @@ class HorizonDetectorLib:
             vp1 = model / model[2]
             plot_axis.plot(vp1[0], vp1[1], 'bo')
 
+            # Parameter: Ransac inlier threshold
             # Before determining the second VP, remove inliers as they already contributed to first VP
             path_lines_reduced = HorizonDetectorLib.remove_inliers(vp1, path_lines, 30)
 
@@ -342,7 +345,7 @@ class HorizonDetectorLib:
             # Before determining the second VP, remove inliers as they already contributed to first VP
             path_lines_reduced_again = HorizonDetectorLib.remove_inliers(vp2, path_lines_reduced, 60)
 
-            # Find second vanishing point
+            # Find zenith
             model3 = HorizonDetectorLib.ransac_vanishing_point(path_lines_reduced_again)
             vp3 = model3 / model3[2]
             plot_axis.plot(vp3[0], vp3[1], 'bo')
@@ -428,8 +431,9 @@ class HorizonDetectorLib:
 
                 # Its distance to center and the horizon
                 horizon_distance = np.abs(np.dot(current_model.T, horizon_homogenous))
+                centre_distance = np.linalg.norm(current_model[:2] - image_center[:2])
 
-                if np.sum(current_model ** 2) < 1 or current_model[2] == 0:
+                if np.sum(current_model ** 2) < 1 or current_model[2] == 0 :
                     # reject degenerate candidates, which lie on the wrong side of the horizon
                     continue
 
@@ -543,9 +547,9 @@ class HorizonDetectorLib:
         dot_prod = np.sum(est_directions * directions, axis=1)
         abs_prod = np.linalg.norm(directions, axis=1) * \
                    np.linalg.norm(est_directions, axis=1)
-        abs_prod[abs_prod == 0] = 1e-5
+        abs_prod[abs_prod == 0] = sys.float_info.epsilon
 
-        cosine_theta = dot_prod / abs_prod
+        cosine_theta = dot_prod / (abs_prod + sys.float_info.epsilon)
         theta = np.arccos(np.abs(cosine_theta))
 
         theta_thresh = threshold_inlier * np.pi / 180

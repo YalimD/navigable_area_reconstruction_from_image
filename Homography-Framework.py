@@ -500,6 +500,7 @@ def remove_inliers(model, edgelets, threshold_inlier=10):
 
 #This function rotates the image according to the angle of the horizon in order to allign the horizon
 #"horizontally"
+# TODO: To be deleted
 def allignHorizon(image, horizon):
 
     height,width,_ = image.shape
@@ -1228,7 +1229,6 @@ def rectify_groundPlane(image_path, segmented_img_path, detection_data_file):
 # - Modify plt plots (everything should be same type) so horizon images can be seen throughout all program
 # - Add parameter to our method
 # - Have a through test with all videos,  coupled with Unity
-# - Correct that simulation bug about RVO
 # - We will also show the stratified approach, so be sure to document it good as well
 # - Make focal length as a parameter for both simulation and this part
 # - OOP revision and DONE

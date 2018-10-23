@@ -15,17 +15,11 @@ by converting it to bird-view perspective as close as possible.
 
 Works on a single image, camera is assumed to be not calibrated and focal_unity length is not known.
 
+TODO: Revise
 Algorithm steps
 - Using RANSAC, find the best point that represents the vanishing points, according to
 its reachabilty from other edges in the image
 - Identify the vanishing line as the combination of left and right VP (manhattan world assumption) 
-
-IF THE VANISHING LINE IS NOT PARALLEL:
-- ROTATE THE IMAGE WITH THE ANGLE THAT THE VANISHING LINE HAS WITH THE X AXIS
-- CLIP THE IMAGE ACCORDINGLY
-- PROCEED WITH THE HOMOGRAPHY 
-- AFTER THE UNITY'S CAMERA IS PLACED AND ADJUSTED ACCORDING TO HOMOGRAPHY,
-APPLY THE INVERSE OF THIS ROTATION
 
 - Apply the homography logic we have talked before
 
@@ -131,46 +125,14 @@ def extract_circular_points(trajectory_lines, P, method):
 
     return intersections, mean_intersection
 
+#TODO: Modified version of Google's paper
 def compute_homography_and_warp(image,
                                 vp1, vp2,
                                 trajectories,
                                 corners,
-                                clip=True, clip_factor=3, method="posture"):
+                                method = "posture"):
 
-    # TODO: Method parameter is useless
-
-    """Compute homography from vanishing points and warp the image.
-
-    It is assumed that vp1 and vp2 correspond to horizontal and vertical
-    directions, although the order is not assumed.
-    Firstly, projective transform is computed to make the vanishing points go
-    to infinty so that we have a fronto parellel view. Then,Computes affine
-    transfom  to make axes corresponding to vanishing points orthogonal.
-    Finally, Image is translated so that the image is not missed. Note that
-    this image can be very large. `clip` is provided to deal with this.
-
-    Parameters
-    ----------
-    image: ndarray
-        Image which has to be wrapped.
-    vp1: ndarray of shape (3, )
-        First vanishing point in homogenous coordinate system.
-    vp2: ndarray of shape (3, )
-        Second vanishing point in homogenous coordinate system.
-    clip: bool, optional
-        If True, image is clipped to clip_factor.
-    clip_factor: float, optional
-        Proportion of image in multiples of image size to be retained if gone
-        out of bounds after homography.
-    Returns
-    -------
-    warped_img: ndarray
-        Image warped using homography as described above.
-    """
-
-    final_homography = np.eye(3,3)
-
-    height,width,_ = image.shape
+    height, width, _ = image.shape
 
     # Find Projective Transform
     vanishing_line = np.cross(vp1, vp2)
@@ -193,69 +155,26 @@ def compute_homography_and_warp(image,
 
     final_homography = np.dot(A, H)
 
-    # Find directions corresponding to vanishing points
-    v_post1 = np.dot(final_homography, vp1) #Direction is found by multiplying with the projection matrix
-    v_post2 = np.dot(final_homography, vp2)
+    # region Translation and scaling operations
 
-    #Normalize
-    v_post1 = v_post1 / np.sqrt(v_post1[0]**2 + v_post1[1]**2)
-    v_post2 = v_post2 / np.sqrt(v_post2[0]**2 + v_post2[1]**2)
+    # Until this point the last line of final_homography is the vanishing line
+    # Multiplying with this matrix gives us the
 
-    # X and Y parts of the directions are used to find the angle it makes with
+    # TODO: Search this
+    cords = np.dot(final_homography,
+                                [[0, 0, image.shape[1], image.shape[1]],
+                                [0, image.shape[0], 0, image.shape[0]],
+                                [1, 1, 1, 1]])
 
-    #Arctan is used to find the small angle with the mentioned axis, having X at top gives result according to Y axis
-    directions = np.array([[v_post1[0], -v_post1[0], v_post2[0], -v_post2[0]],
-                           [v_post1[1], -v_post1[1], v_post2[1], -v_post2[1]]])
-
-    # TODO: Change 0 ad 1 to find it according to Y axis
-    #Finds the angle it makes with the horizon
-    thetas = np.arctan2(directions[0], directions[1])
-
-    # Find the index for
-    h_ind = np.argmin(np.abs(thetas))
-
-    # Find positive angle among the rest for the vertical axis
-    if h_ind // 2 == 0:# If the angle is positive
-        v_ind = 2 + np.argmax([thetas[2], thetas[3]])
-    else:
-        v_ind = np.argmax([thetas[2], thetas[3]])
-
-    #Rotation matrix
-    A1 = np.array([[directions[0, v_ind], directions[0, h_ind], 0],
-                   [directions[1, v_ind], directions[1, h_ind], 0],
-                   [0, 0, 1]])
-    # Might be a reflection. If so, remove reflection.
-    if np.linalg.det(A1) < 0:
-        A1[:, 0] = -A1[:, 0]
-
-    A = np.linalg.inv(A1)
-
-    # Translate so that whole of the image is covered
-    final_homography = np.dot(A, final_homography)
-
-    #Cropping matrix
-    cords = np.dot(final_homography, [[0, 0, image.shape[1], image.shape[1]],
-                                  [0, image.shape[0], 0, image.shape[0]],
-                                  [1, 1, 1, 1]])
+    # Now, the lines contain x and y coordinates of all points of the model
+    # The smallest ones are clamped to 0-0 borders by determining the min
     cords = cords[:2] / cords[2]
 
     tx = min(0, cords[0].min())
     ty = min(0, cords[1].min())
 
-    max_x = cords[0].max() - tx
-    max_y = cords[1].max() - ty
-
-    if clip:
-        # These might be too large. Clip them.
-        max_offset = max(image.shape) * clip_factor / 2
-        tx = max(tx, -max_offset)
-        ty = max(ty, -max_offset)
-
-        max_x = min(max_x, -tx + max_offset)
-        max_y = min(max_y, -ty + max_offset)
-
-    max_x = int(max_x)
-    max_y = int(max_y)
+    max_x = int(cords[0].max() - tx)
+    max_y = int(cords[1].max() - ty)
 
     T = np.array([[1, 0, -tx],
                   [0, 1, -ty],
@@ -269,9 +188,11 @@ def compute_homography_and_warp(image,
 
     final_homography = np.dot(S, final_homography)
 
-    # final_homography = np.eye(3)
+    # endregion
 
-    warped_img = transform.warp(image, np.linalg.inv(final_homography),
+    warped_img = transform.warp(image,
+                                np.linalg.inv(final_homography),
+                                clip = False,
                                 output_shape=(height, width))
 
     transformed_corners = transform.matrix_transform(corners, final_homography)
@@ -279,6 +200,8 @@ def compute_homography_and_warp(image,
     return warped_img, transformed_corners, final_homography
 
 #region ground_truth_determination
+
+
 def mouse_handler(event, x, y, flags, data):
 
     if event == cv2.EVENT_LBUTTONDOWN:
@@ -287,23 +210,30 @@ def mouse_handler(event, x, y, flags, data):
             cv2.circle(data['image'], (x, y), 3, (0, 0, 255), 5, 16)
             cv2.imshow(data['windowName'], data['image'])
 
+
 # Finds the normalized cross product of two elements in homogenous coordinates
-def determineCross(elem1, elem2):
+def normalizedCross(elem1, elem2):
 
     c = np.cross(elem1, elem2)
     return c / c[2]
 
-def processPoints(data):
 
-    lineA = determineCross(*data['points'][0:2])
-    lineB = determineCross(*data['points'][2:4])
-    point1 = list(map(lambda x: int(x), determineCross(lineA, lineB)))
+def processGTlines(data):
 
-    lineA = determineCross(*data['points'][4:6])
-    lineB = determineCross(*data['points'][6:8])
-    point2 = list(map(lambda x: int(x), determineCross(lineA, lineB)))
+    lineA = normalizedCross(*data['points'][0:2])
+    lineB = normalizedCross(*data['points'][2:4])
+    point1 = list(map(lambda x: int(x), normalizedCross(lineA, lineB)))
 
-    vanishing = determineCross(point1, point2)
+    lineA = normalizedCross(*data['points'][4:6])
+    lineB = normalizedCross(*data['points'][6:8])
+    point2 = list(map(lambda x: int(x), normalizedCross(lineA, lineB)))
+
+    horizon = normalizedCross(point1, point2)
+
+    # TODO: Uisng hozironLİB, convert the posture pairs into lines and use ransacmethod
+    # to determine the zenith VP.
+
+    # choose x = 0 and x= widrth for points on horizon, when calculating the fov
 
     cv2.circle(data['image'], (point1[0], point1[1]), 3, (0, 255, 0), 5, 16)
     cv2.circle(data['image'], (point2[0], point2[1]), 3, (0, 255, 0), 5, 16)
@@ -312,7 +242,7 @@ def processPoints(data):
     cv2.imshow(data['windowName'], data['image'])
     cv2.waitKey(0)
 
-    return vanishing
+    return horizon
 
 # endregion
 
@@ -342,7 +272,7 @@ def rectify_groundPlane(image_path,
         cv2.setMouseCallback(window_name, mouse_handler, clicked_points)
         cv2.waitKey(0)
 
-        ground_truth_horizon = processPoints(clicked_points)
+        ground_truth_horizon = processGTlines(clicked_points)
 
     else:
         cv2.imshow("Image of Interest", image)
@@ -357,18 +287,20 @@ def rectify_groundPlane(image_path,
 
     # Obtain the postures of the pedestrian as lines too, to find the VP
     # The sample taken every few frames can become a performance concern
-    # TODO: Turn tracked pedestrian id's into parameters
-    pedestrian_posture_paths, pedestrian_postures = horizon_detector.HorizonDetectorLib.parse_pedestrian_detection(np.copy(image),
-                                                                                                                   detection_data_file,
-                                                                                                                   65,
-                                                                                                                   use_bounding_boxes=False,
-                                                                                                                   returnPosture= True) # Parameter
+    pedestrian_posture_paths, pedestrian_postures = horizon_detector.HorizonDetectorLib\
+        .parse_pedestrian_detection(np.copy(image),
+                                    detection_data_file,
+                                    frames_per_check,
+                                    use_bounding_boxes=False,
+                                    returnPosture= True)
 
-    pedestrian_posture_paths_single, _ = horizon_detector.HorizonDetectorLib.parse_pedestrian_detection(np.copy(image),
-                                                                                                        detection_data_file,
-                                                                                                        5,
-                                                                                                        use_bounding_boxes=False,
-                                                                                                        tracker_id=[17,10,56]) # Parameter
+    # Single posture implementation requires pedestrian ID's
+    pedestrian_posture_paths_single, _ = horizon_detector.HorizonDetectorLib\
+        .parse_pedestrian_detection(np.copy(image),
+                                    detection_data_file,
+                                    5,
+                                    use_bounding_boxes=False,
+                                    tracker_id=[2]) # Parameter
 
     #If we assume the people doesn't change their velocities much
     #and calculate a homography between a path with multiple detections
@@ -376,15 +308,12 @@ def rectify_groundPlane(image_path,
     #These methods use bounding boxes
     pedestrian_bb_paths, _ = horizon_detector.HorizonDetectorLib.parse_pedestrian_detection(np.copy(image),
                                                                                             detection_data_file,
-                                                                                            30)
+                                                                                            frames_per_check)
     trajectory_lines, _ = horizon_detector.HorizonDetectorLib.parse_pedestrian_detection(np.copy(image),
                                                                                          detection_data_file,
-                                                                                         30,
+                                                                                         frames_per_check,
                                                                                          use_bounding_boxes = False,
-                                                                                         feet_only = True) # Parameter
-
-    # pedestrian_postures_image_lines = [np.concatenate((pedestrian_postures[j], image_lines[j]), axis=0)
-    #                        for j in range(3)] UNUSED
+                                                                                         feet_only = True)
 
     # - Postures as both feet and head trajectories (too sensitive to noise, not preferable)
     # - Single tracker posture (better than above)
@@ -397,31 +326,34 @@ def rectify_groundPlane(image_path,
         # 'single': [pedestrian_posture_paths_single, False],
         # 'bb': [pedestrian_bb_paths, False],
         # 'hough': [image_lines, True],
-        # # 'trajectory': [trajectory_lines, True], DONT USE
         # 'trajectory_hough': [[np.concatenate((trajectory_lines[j], image_lines[j]), axis=0)
         #                       for j in range(3)] , True],
         'postures_hough': [[np.concatenate((pedestrian_posture_paths[j], image_lines[j]), axis=0)
                               for j in range(3)], True]
     }
 
-    row = 3
-    col = 2
+    row = 1
+    col = 1
     horizon_fig, horizon_axis = plt.subplots(row, col)
     rectified_fig, rectified_axis = plt.subplots(row,col)
-    height,width, _ = image.shape
-    # ion()
+    height, width, _ = image.shape
+    ion()
 
     for i, k in enumerate(vp_determination_methods):
 
         # Determine the horizon
         lines = vp_determination_methods[k][0]
 
-        plot_axis = horizon_axis[i//col, i % col]
+        if row == 1 and col == 1:
+            plot_axis = horizon_axis
+        else:
+            plot_axis = horizon_axis[i // col, i % col]
         plot_axis.set_title(str(k))
         plot_axis.imshow(image)
 
         # In case no suitable lines for horizon calculation is found, skip
         if len(lines[0]) > 0:
+
             leftVP, rightVP, zenith_vp, r_mse = horizon_detector.HorizonDetectorLib.determineVP(lines,
                                                                                          np.copy(image),
                                                                                          plot_axis= plot_axis,
@@ -444,11 +376,18 @@ def rectify_groundPlane(image_path,
 
             fov = math.degrees(2 * math.atan2(height , (2 * focal_length)))
 
-            # Just to validate the fov/focal_length calculation
-            focal_length = height * (1 / np.tan(np.deg2rad(fov / 2))) / 2
-
-            print("Method: {}, left: {}, right: {}".format(k,leftVP[:2],rightVP[:2]))
+            print("Method: {}, left: {}, right: {}".format(k, leftVP[:2], rightVP[:2]))
             print("Zenith: {}, focal: {} with fov: {}".format(zenith_vp[:2], focal_length, fov))
+
+
+            # region result_validation
+
+            # There are some constraints on the resulting fov and found horizon
+            # - As the videos are taken from a high altitude, the zenith is expected to be below the horizon (birdview)
+            # - TODO: The rectified region should be a convex polygon
+            # If any of them is not satisfied, then the process shall be repeated as the horizon is invalid
+
+            # endregion
 
             plot_axis.imshow(image)
             plot_axis.plot((zenith_vp[0]), (zenith_vp[1]), 'go')
@@ -461,13 +400,15 @@ def rectify_groundPlane(image_path,
                                                                          list(rightVP),
                                                                          trajectory_lines,
                                                                          image_points,
-                                                                         clip=True,
-                                                                         clip_factor=3,
                                                                          method=k)
-            plot_axis = rectified_axis[i//col, i % col]
+
+            if row == 1 and col == 1:
+                plot_axis = rectified_axis
+            else:
+                plot_axis = rectified_axis[i // col, i % col]
+
             plot_axis.set_title(str(k))
             plot_axis.imshow(warped_result)
-
 
             for i in range(len(model_points)):
                 plot_axis.plot([model_points[i][0], model_points[(i + 1) % 4][0]],
@@ -488,6 +429,7 @@ def rectify_groundPlane(image_path,
 
             # Determine the region under the horizon in the image
             #  TODO: I think this is unnecessary
+            # region image_below_horizon
             corners_homo = [[*corner, 1] for corner in image_points]
 
             left_border = np.cross(corners_homo[0], corners_homo[3])
@@ -503,7 +445,9 @@ def rectify_groundPlane(image_path,
 
             image_points = [[pnt[0], max(0,pnt[1])] for pnt in image_points]
 
-            if True:
+            # endregion
+
+            if False:
                 cameraCalibration.CameraCalibration.extractCameraParameters(k,
                                                                             image,
                                                                             warped_result,
@@ -514,12 +458,8 @@ def rectify_groundPlane(image_path,
     plt.show(horizon_fig)
     plt.show(rectified_fig)
 
-# TODO:
-# - Have a through test with all videos, coupled with Unity
-# - We will also show the stratified approach, so be sure to document it good as well,
-# - When writing, read about pnp as it is used for placement
-# Then read other horizon detections for comparison
 if __name__ == "__main__":
+
     print("Welcome to the perspective corrector")
 
     aparser = argparse.ArgumentParser(description="Using the image perspective cues and pedestrian detection data"
