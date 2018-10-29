@@ -125,7 +125,7 @@ def extract_circular_points(trajectory_lines, P, method):
 
     return intersections, mean_intersection
 
-#TODO: Modified version of Google's paper
+#Modified version of Google's paper
 def compute_homography_and_warp(image,
                                 vp1, vp2,
                                 trajectories,
@@ -247,6 +247,10 @@ def normalizedCross(elem1, elem2):
     c = np.cross(elem1, elem2)
     return c / c[2]
 
+def focalToFOV(focal, height):
+
+    return math.degrees(2 * math.atan2(height , (2 * focal)))
+
 
 def processGTlines(data):
 
@@ -260,19 +264,34 @@ def processGTlines(data):
 
     horizon = normalizedCross(point1, point2)
 
-    # TODO: Uisng hozironLİB, convert the posture pairs into lines and use ransacmethod
-    # to determine the zenith VP.
+    # As every line pair represents the two heads, every even/odd point creates a pair to be used
+    # for a zenith vanishing point
 
-    # choose x = 0 and x= widrth for points on horizon, when calculating the fov
+    zenith_lines = []
+
+    zenith_lines.append([data['points'][0], data['points'][2]])
+    zenith_lines.append([data['points'][1], data['points'][3]])
+    zenith_lines.append([data['points'][4], data['points'][6]])
+    zenith_lines.append([data['points'][5], data['points'][7]])
+
+    # Give those pairs to horizon library to obtain a zenith vanishing point
+    zanith_edgelets = horizon_detector.HorizonDetectorLib.lineProperties(zenith_lines, data['image'])
+    ground_zenith, ground_focal, _ = horizon_detector.HorizonDetectorLib.ransac_zenith_vp(zanith_edgelets,
+                                                                         [point1, point2],
+                                                                         [data['image'].shape[0] / 2,
+                                                                          data['image'].shape[1] / 2])
+
 
     cv2.circle(data['image'], (point1[0], point1[1]), 3, (0, 255, 0), 5, 16)
     cv2.circle(data['image'], (point2[0], point2[1]), 3, (0, 255, 0), 5, 16)
+    cv2.circle(data['image'], (int(ground_zenith[0]), int(ground_zenith[1])), 3, (255, 0, 0), 5, 16)
+
 
     cv2.line(data['image'], (point1[0], point1[1]), (point2[0], point2[1]), (255, 0, 0), 5, 16)
     cv2.imshow(data['windowName'], data['image'])
     cv2.waitKey(0)
 
-    return horizon
+    return horizon, ground_zenith, ground_focal
 
 # endregion
 
@@ -283,10 +302,12 @@ def rectify_groundPlane(image_path,
                         detection_data_file,
                         frames_per_check,
                         ground_truth_horizon,
+                        ground_truth_zenith,
                         draw_features):
 
     # Manuel testing debugging part:
     image = cv2.imread(image_path)
+    height, width, _ = image.shape
     segmented_img = cv2.imread(segmented_img_path)
 
     if ground_truth_horizon is None:
@@ -302,13 +323,19 @@ def rectify_groundPlane(image_path,
         cv2.setMouseCallback(window_name, mouse_handler, clicked_points)
         cv2.waitKey(0)
 
-        ground_truth_horizon = processGTlines(clicked_points)
+        ground_truth_horizon, ground_truth_zenith, ground_truth_focal = processGTlines(clicked_points)
 
     else:
         cv2.imshow("Image of Interest", image)
         cv2.waitKey(5)
 
     print("Ground-truth vanishing line {}".format(ground_truth_horizon))
+    print("Ground-truth zenith vp {}".format(ground_truth_zenith))
+    print("Ground-truth focal length {}".format(ground_truth_focal))
+
+    ground_fov = focalToFOV(ground_truth_focal, height)
+
+    print("Ground-truth fov {}".format(ground_fov))
 
     # Extract the lines from the whole image
     image_lines = horizon_detector.HorizonDetectorLib.extract_image_lines(image)
@@ -366,7 +393,6 @@ def rectify_groundPlane(image_path,
     col = 1
     horizon_fig, horizon_axis = plt.subplots(row, col)
     rectified_fig, rectified_axis = plt.subplots(row,col)
-    height, width, _ = image.shape
     # ion()
 
     for i, k in enumerate(vp_determination_methods):
@@ -405,12 +431,13 @@ def rectify_groundPlane(image_path,
             zenith_vp = zenith_vp / zenith_vp[2]
 
             fov = math.degrees(2 * math.atan2(height , (2 * focal_length)))
+            fov = focalToFOV(focal_length, height)
 
             print("Method: {}, left: {}, right: {}".format(k, leftVP[:2], rightVP[:2]))
             print("Zenith: {}, focal: {} with fov: {}".format(zenith_vp[:2], focal_length, fov))
 
             plot_axis.imshow(image)
-            plot_axis.plot((zenith_vp[0]), (zenith_vp[1]), 'go')
+            plot_axis.plot((zenith_vp[0]), (zenith_vp[1]), 'ro')
             plot_axis.plot((center[0]), (center[1]), 'yo')
 
 
@@ -490,13 +517,12 @@ def rectify_groundPlane(image_path,
 
             # endregion
 
-            if True:
-                cameraCalibration.CameraCalibration.extractCameraParameters(k,
-                                                                            image,
-                                                                            warped_result,
-                                                                            model_points,
-                                                                            image_points,
-                                                                            intrinsic, H)
+            cameraCalibration.CameraCalibration.extractCameraParameters(k,
+                                                                        image,
+                                                                        warped_result,
+                                                                        model_points,
+                                                                        image_points,
+                                                                        intrinsic)
 
     plt.show(horizon_fig)
     plt.show(rectified_fig)
@@ -513,6 +539,8 @@ if __name__ == "__main__":
     aparser.add_argument("--frames_per_check", help = "How many frames needs to pass before new position is sampled",
                          type=int, default=60)
     aparser.add_argument("--ground_truth_horizon", nargs='+', help = "Homogenous coordinates of the ground truth, all 3 coordinates",
+                         type=float, default = None)
+    aparser.add_argument("--ground_truth_zenith", nargs='+', help = "Zenith VP coordinates of the ground truth",
                          type=float, default = None)
     aparser.add_argument("--draw_features", nargs='+', help = "Draw the postures, image lines and such features on the image when determining the horizon",
                          type=bool, default=False)

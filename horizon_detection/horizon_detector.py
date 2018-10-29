@@ -173,6 +173,7 @@ class HorizonDetectorLib:
 
     # Extracts the line properties from given line segments
     # Returns centers, directions and strengths
+    # Uses image for displaying
     @staticmethod
     def lineProperties(lines, image):
         line_directions = []
@@ -180,7 +181,10 @@ class HorizonDetectorLib:
         line_strengths = []
 
         for line in lines:
-            line = np.array(line).flatten()  # Compatibility
+            line = list(np.array(line).flatten())  # Compatibility
+
+            if len(line) > 4: #Homogenous coordinates are given
+                line = line[:2] + line[3:5]
 
             x0 = int(line[0]);
             y0 = int(line[1])
