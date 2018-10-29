@@ -61,7 +61,7 @@ class CameraCalibration:
 
     # TODO: Comment and explain
     @staticmethod
-    def extractCameraParameters(horizon_method, image, warped_img, model_points, image_points, K, H = None):
+    def extractCameraParameters(horizon_method, image, warped_img, model_points, image_points, K, H):
 
         h_org, w_org, _ = image.shape
         h_warped, w_warped, _ = warped_img.shape
@@ -85,7 +85,31 @@ class CameraCalibration:
         # Initially, the model is left in openCV coordinate system, as homography correction
         # process is only valid in identical coordinate systems.
 
+        # temp_image_points = np.float64([[x[0], h_org - x[1]] for x in image_points])
         temp_image_points = np.float64([[x] for x in image_points])
+
+        # The corrected image would grow large so we need to assign extra space for it
+        model_resize = 2
+        warped_image_large = np.zeros((h_warped * model_resize, w_warped * model_resize, 3))
+        warped_image_large[int(h_warped * ((model_resize - 1) / 2)) : int(h_warped * ((model_resize + 1) / 2))
+                        , int(w_warped * ((model_resize - 1) / 2)): int(w_warped * ((model_resize + 1) / 2)), :] = warped_img
+
+        h_warped_large, w_warped_large, _ = warped_image_large.shape
+
+        model_points_large = np.array(list( map( lambda x: x + [w_warped * ((model_resize - 1) / 2),
+                                                                h_warped * ((model_resize - 1) / 2)], model_points)))
+
+
+        plt.figure()
+        plt.title("Before correction, large mesh model")
+        plt.imshow(warped_image_large)
+
+        for i in range(len(model_points_large)):
+            plt.plot([model_points_large[i][0], model_points_large[(i + 1) % len(model_points_large)][0]],
+                     [model_points_large[i][1], model_points_large[(i + 1) % len(model_points_large)][1]], 'b')
+
+        plt.show()
+
 
         rvec = np.zeros((3, 1))
         tvec = np.zeros((3, 1))
@@ -100,10 +124,11 @@ class CameraCalibration:
         for v, k in enumerate(algorithms):
 
             # Adjust the solution to match the endpoints of the image to the endpoints of the model
-            temp_model_points = np.float64([[x[0], 0, x[1]] for x in model_points])
+            temp_model_points = np.float64([[x[0], 0, h_warped_large - x[1]] for x in model_points_large])
 
-            number_of_corrections = 20
+            number_of_corrections = 50
             allignment_error = np.inf #In pixel distance
+            allignment_error_threshold = 3
 
             for _ in range(number_of_corrections):
 
@@ -127,9 +152,9 @@ class CameraCalibration:
                     # Apply the homography on horizon and zenith points to adjust them (potentially)
                     # to appropriate focal length
 
-                    wrapped_model = np.array(list(map(lambda x: [x[0], x[2]], temp_model_points)))
+                    wrapped_model = np.array(list(map(lambda x: [x[0], h_warped_large - x[2]], temp_model_points)))
                     wrapped_model = transform.matrix_transform(wrapped_model, adjustment_homography)
-                    wrapped_model = np.array(list(map(lambda x: [x[0], 0, x[1]], wrapped_model)))
+                    wrapped_model = np.array(list(map(lambda x: [x[0], 0, h_warped_large - x[1]], wrapped_model)))
 
                     model_update_coefficient = 0.5
                     temp_model_points = temp_model_points * (1 - model_update_coefficient) +\
@@ -138,56 +163,54 @@ class CameraCalibration:
                     allignment_error = sum(np.linalg.norm(model_on_image - image_points, axis=1))
 
                     # If the distance between points is smaller than a threshold, stop
-                    if allignment_error < 3:
+                    if allignment_error < allignment_error_threshold:
                         break
 
                 else:
                     break
 
 
-            # TODO: This section is unnecessary
+
             # region warped_image_correction
 
             # The warped image is updated to match the adjustments of the model
 
             # Recalculate the adjustment homography as the warped results were interpolated in the mesh
-            temp_model_points = np.array(list(map(lambda x: [x[0], x[2]], temp_model_points)))
-            adjustment_homography, _ = cv2.findHomography(model_points, temp_model_points)
+            temp_model_points = np.array(list(map(lambda x: [x[0], h_warped_large - x[2]], temp_model_points)))
 
-            # Cropping matrix
-            cords = np.dot(adjustment_homography, [[0, 0, image.shape[1], image.shape[1]],
-                                              [0, image.shape[0], 0, image.shape[0]],
-                                              [1, 1, 1, 1]])
-            cords = cords[:2] / cords[2]
+            adjustment_homography, _ = cv2.findHomography(model_points_large, temp_model_points)
 
-            tx = min(0, cords[0].min())
-            ty = min(0, cords[1].min())
 
-            max_x = cords[0].max() - tx
-            max_y = cords[1].max() - ty
+            # Find the required translation to keep navigable region inside the image
 
-            max_x = int(max_x)
-            max_y = int(max_y)
+            tx_min = min(0, temp_model_points[:,0].min())
+            ty_min = min(0, temp_model_points[:,1].min())
+
+            tx_max = max(w_warped_large, temp_model_points[:,0].max()) - w_warped_large
+            ty_max = max(h_warped_large, temp_model_points[:,1].max()) - h_warped_large
+
+            if tx_min == 0 : tx = tx_max
+            else: tx = tx_min
+
+            if ty_min == 0: ty = ty_max
+            else: ty = ty_min
 
             T = np.array([[1, 0, -tx],
                           [0, 1, -ty],
                           [0, 0, 1]])
 
-            S = np.array([[w_warped / max_x, 0, 0],
-                          [0, h_warped / max_y, 0],
-                          [0, 0, 1]])
-
-            cropping_matrix = np.dot(S,T)
+            cropping_matrix = T
 
             adjustment_homography = np.dot(cropping_matrix, adjustment_homography)
 
-            warped_img = transform.warp(warped_img, np.linalg.inv(adjustment_homography),
-                                        output_shape = (h_warped, w_warped),
-                                        preserve_range=True)
+            warped_img = transform.warp(warped_image_large, np.linalg.inv(adjustment_homography),
+                                        output_shape = (h_warped_large, w_warped_large),
+                                        preserve_range=False)
 
             plt.figure()
             plt.title("Updated warped image")
             plt.imshow(warped_img)
+            plt.imsave("warped_result_final.png", warped_img)
 
             # Re-adjust the model points according to translated and scaled warped image
             temp_model_points = transform.matrix_transform(temp_model_points, cropping_matrix)
@@ -198,33 +221,10 @@ class CameraCalibration:
 
             plt.show()
 
-            # After the adjustments to the mesh model is complete, the model is converted into the Unity's coordinate system
-            # and pnp is ran again to obtain the camera placement in Unity's coordinate space.
-
-            # On model, the lower right corner will be considered as the axis
-            # The Y coordinate needs to be reversed as in Unity, y (z) is forward
-            h_warped, w_warped, _ = warped_img.shape
-
-            model_points = np.float64([[x[0], 0, h_warped - x[1]] for x in temp_model_points])
-
-            # Recalculate the pnp according to Unity corrected mesh
-            _ret, rvec, tvec = cv2.solvePnP(
-                model_points, temp_image_points,
-                K, dist_coef,
-                flags=v)
-
-            # Display the result of the solution and return the points of the model on the image
-            CameraCalibration.displayPlacement(
-                                            image,
-                                            model_points,
-                                            rvec, tvec,
-                                            K, dist_coef,
-                                            horizon_method + "_final"
-                                            )
-
             # endregion
 
-            # As the pnp gives us the object translation, we need to get the camera translation by transposing
+            # As the pnp gives us the object translation, we need to get the camera translation by transposing and
+            # applying the inverse rotation to translation
             rvec, _ = cv2.Rodrigues(rvec)
             rvec = np.transpose(rvec)
             tvec = np.dot(-rvec, tvec)
@@ -238,18 +238,28 @@ class CameraCalibration:
 
             # Extrinsic Line
             tvec = [t[0] for t in tvec]
+
+            # Adjustment for translation in model
+            tvec[0] -= tx
+            tvec[2] += ty
+
             CameraCalibration.camWriter.write("{} {} {} {} {} {} {} {} {} {} {} {} {} {}\n"
                                               .format(*(rvec[:, 0]), *(rvec[:, 1]),*(rvec[:, 2]),
                                                       *tvec,
                                                       w_warped, h_warped))
 
+
+
+
             print(k)
             print("Rotation Rodrigues {}".format(rvec))
 
+            # For debugging purposes
             rvec, _ = cv2.Rodrigues(rvec)
 
             rvec[0] = np.rad2deg(rvec[0])
             rvec[1] = np.rad2deg(rvec[1])
             rvec[2] = np.rad2deg(rvec[2])
+
             print("Rotation Euler Angles {}".format(rvec))
             print("Translation {}".format(tvec))

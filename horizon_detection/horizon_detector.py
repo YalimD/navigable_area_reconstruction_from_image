@@ -27,8 +27,8 @@ class HorizonDetectorLib:
         grayscale_img = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
         edges = feature.canny(grayscale_img, 3)
         # Parameter: Parameter
-        line_segments = transform.probabilistic_hough_line(edges,   line_length=20,
-                                                                    line_gap=10)
+        line_segments = transform.probabilistic_hough_line(edges,   line_length=110,
+                                                                    line_gap=30)
 
         # Edge detection (canny for now)
         # grayscale_img = cv2.Canny(grayscale_img, threshold1=75, threshold2=200, apertureSize=3)

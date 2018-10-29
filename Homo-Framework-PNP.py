@@ -157,22 +157,29 @@ def compute_homography_and_warp(image,
 
     # region Translation and scaling operations
 
-    # Until this point the last line of final_homography is the vanishing line
-    # Multiplying with this matrix gives us the
+    # The image corners are transformed by the current matrix to determine the
+    # endpoints of the resulting wrapped image. Each column is a corner in homogenous
+    # coordinates
 
-    # TODO: Search this
-    cords = np.dot(final_homography,
-                                [[0, 0, image.shape[1], image.shape[1]],
-                                [0, image.shape[0], 0, image.shape[0]],
-                                [1, 1, 1, 1]])
+    image_corners = np.array([
+                                [0, 0, width, width],
+                                [0, height, 0, height],
+                                [1, 1, 1, 1]
+                            ])
 
-    # Now, the lines contain x and y coordinates of all points of the model
-    # The smallest ones are clamped to 0-0 borders by determining the min
+    # Apply the current transformation
+    cords = np.dot(final_homography, image_corners)
+
+    # Normalize the points
     cords = cords[:2] / cords[2]
 
+    # Now, the lines contain x and y coordinates of all points of the model
+    # The smallest ones are translated to 0-0 borders by determining the min
     tx = min(0, cords[0].min())
     ty = min(0, cords[1].min())
 
+    # Considering the applied transformation, determine the farthest points to the
+    # upper left corner
     max_x = int(cords[0].max() - tx)
     max_y = int(cords[1].max() - ty)
 
@@ -188,6 +195,9 @@ def compute_homography_and_warp(image,
 
     final_homography = np.dot(S, final_homography)
 
+    # We end up with a image that has the same size but perspective corrected
+    # We don't clamp the result as losing information is not an option
+
     # endregion
 
     warped_img = transform.warp(image,
@@ -198,6 +208,26 @@ def compute_homography_and_warp(image,
     transformed_corners = transform.matrix_transform(corners, final_homography)
 
     return warped_img, transformed_corners, final_homography
+
+# Checks the polygon convexity by finding the determinant for each 3 corners in cc order
+def check_polygon_convexity(model_points):
+
+    for corner_index in range(model_points.shape[0]):
+
+        corner = model_points[corner_index]
+        next_corner = model_points[(corner_index + 1) % model_points.shape[0]]
+
+        det_matrix = np.array([
+            [1,1,1],
+            [corner[0], corner[1], 0],
+            [next_corner[0], next_corner[1], 0],
+        ])
+
+        if np.linalg.det(det_matrix <= 0):
+            return False
+
+    return True
+
 
 #region ground_truth_determination
 
@@ -337,7 +367,7 @@ def rectify_groundPlane(image_path,
     horizon_fig, horizon_axis = plt.subplots(row, col)
     rectified_fig, rectified_axis = plt.subplots(row,col)
     height, width, _ = image.shape
-    ion()
+    # ion()
 
     for i, k in enumerate(vp_determination_methods):
 
@@ -379,16 +409,6 @@ def rectify_groundPlane(image_path,
             print("Method: {}, left: {}, right: {}".format(k, leftVP[:2], rightVP[:2]))
             print("Zenith: {}, focal: {} with fov: {}".format(zenith_vp[:2], focal_length, fov))
 
-
-            # region result_validation
-
-            # There are some constraints on the resulting fov and found horizon
-            # - As the videos are taken from a high altitude, the zenith is expected to be below the horizon (birdview)
-            # - TODO: The rectified region should be a convex polygon
-            # If any of them is not satisfied, then the process shall be repeated as the horizon is invalid
-
-            # endregion
-
             plot_axis.imshow(image)
             plot_axis.plot((zenith_vp[0]), (zenith_vp[1]), 'go')
             plot_axis.plot((center[0]), (center[1]), 'yo')
@@ -401,6 +421,22 @@ def rectify_groundPlane(image_path,
                                                                          trajectory_lines,
                                                                          image_points,
                                                                          method=k)
+
+            # region result_validation
+
+            # There are some constraints on the resulting fov and found horizon
+            # - As the videos are taken from a high altitude, the zenith is expected to be below the horizon (birdview)
+            # - The rectified region should be a convex polygon
+            # If any of them is not satisfied, then the original image should be returned
+
+            if check_polygon_convexity(model_points) is not True:
+
+                #The rectification was unsucessful, restore the image
+                print("The perspective correction was unsuccessful, returning original result")
+                warped_result = image
+                model_points = image_points
+
+            # endregion
 
             if row == 1 and col == 1:
                 plot_axis = rectified_axis
@@ -428,7 +464,9 @@ def rectify_groundPlane(image_path,
 
 
             # Determine the region under the horizon in the image
-            #  TODO: I think this is unnecessary
+            # as rectifying the image above horizon
+            # causes problems. The image should be updated as such.
+
             # region image_below_horizon
             corners_homo = [[*corner, 1] for corner in image_points]
 
@@ -445,9 +483,14 @@ def rectify_groundPlane(image_path,
 
             image_points = [[pnt[0], max(0,pnt[1])] for pnt in image_points]
 
+            # The segments above the horizon shouldn't be considered navigable anyway
+            # but we make sure we crop those parts
+            image = image[image_points[3][1]:,
+                    image_points[3][0]:]
+
             # endregion
 
-            if False:
+            if True:
                 cameraCalibration.CameraCalibration.extractCameraParameters(k,
                                                                             image,
                                                                             warped_result,
