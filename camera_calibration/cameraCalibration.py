@@ -1,5 +1,6 @@
 import numpy as np
 import cv2
+import utils
 import matplotlib.pyplot as plt
 import skimage.transform as transform
 
@@ -107,45 +108,60 @@ class CameraCalibration:
 
         plt.show()
 
-
-        rvec = np.zeros((3, 1))
-        tvec = np.zeros((3, 1))
-        dist_coef = np.zeros(4)
-
         # From experiments, p3p seems like the best
         algorithms = {
-            "p3p": cv2.SOLVEPNP_P3P,
-            # "epnp": cv2.SOLVEPNP_EPNP
+            "iterative": cv2.SOLVEPNP_ITERATIVE, #Working
         }
 
         for v, k in enumerate(algorithms):
 
+            pnp_method = algorithms[k]
+            print("Solving with {}\n".format(k))
+            image = np.copy(clean_img)
+
+            rvec = np.zeros((3, 1))
+            tvec = np.zeros((3, 1))
+            dist_coef = np.zeros(4)
+
             # Adjust the solution to match the endpoints of the image to the endpoints of the model
+            temp_image_points = np.float64([[x] for x in image_points])
             temp_model_points = np.float64([[x[0], 0, h_warped_large - x[1]] for x in model_points_large])
 
             number_of_corrections = 50
             allignment_error = np.inf #In pixel distance
             allignment_error_threshold = 3
 
+            # If the method is upnp, delete focal length from K to check if its possible
+            # to get a good result
+            # if k == "upnp":
+            #     K[:2,:2] = 0
+
+            correction_iteration = 0
+
             for _ in range(number_of_corrections):
+
+
 
                 # Solve the pnp problem, and determine the image location of
                 # endpoints of the model
                 _ret, rvec, tvec = cv2.solvePnP(
                     temp_model_points, temp_image_points,
                     K, dist_coef,
-                    flags=v)
+                    flags=pnp_method)
 
                 # Display the result of the solution and return the points of the model on the image
                 model_on_image = CameraCalibration.displayPlacement(image,
                                                                     temp_model_points,
                                                                     rvec, tvec,
                                                                     K, dist_coef,
-                                                                    horizon_method + " - err:" + str(allignment_error))
+                                                                    horizon_method + "-" + k +
+                                                                    " - err:" + str(allignment_error))
 
                 adjustment_homography, status = cv2.findHomography(model_on_image, temp_image_points)
 
+
                 if all(status):
+
                     # Apply the homography on horizon and zenith points to adjust them (potentially)
                     # to appropriate focal length
 
@@ -159,10 +175,11 @@ class CameraCalibration:
 
                     allignment_error = sum(np.linalg.norm(model_on_image - image_points, axis=1))
 
+                    correction_iteration += 1
+
                     # If the distance between points is smaller than a threshold, stop
                     if allignment_error < allignment_error_threshold:
                         break
-
                 else:
                     break
 
@@ -199,14 +216,14 @@ class CameraCalibration:
 
             adjustment_homography = np.dot(translation_matrix, adjustment_homography)
 
-            warped_img = transform.warp(warped_image_large, np.linalg.inv(adjustment_homography),
+            pnp_warped_img = transform.warp(warped_image_large, np.linalg.inv(adjustment_homography),
                                         output_shape = (h_warped_large, w_warped_large),
                                         preserve_range=False)
 
             plt.figure()
-            plt.title("Updated warped image")
-            plt.imshow(warped_img)
-            plt.imsave("warped_result_final.png", warped_img)
+            plt.title("Updated warped image for {}".format(k))
+            plt.imshow(pnp_warped_img)
+            plt.imsave("warped_result_final_{}.png".format(k), pnp_warped_img)
 
             # Re-adjust the model points according to translated and scaled warped image
             temp_model_points = transform.matrix_transform(temp_model_points, translation_matrix)
@@ -219,13 +236,13 @@ class CameraCalibration:
 
             # endregion
 
+            #region camera_parameters
+
             # As the pnp gives us the object translation, we need to get the camera translation by transposing and
             # applying the inverse rotation to translation
             rvec, _ = cv2.Rodrigues(rvec)
             rvec = np.transpose(rvec)
             tvec = np.dot(-rvec, tvec)
-
-            image = np.copy(clean_img)
 
             # Intrinsic Line
             CameraCalibration.camWriter.write("{} {} {} {} {} {}\n".format(w_org, h_org,
@@ -244,6 +261,13 @@ class CameraCalibration:
                                                       *tvec,
                                                       w_warped, h_warped))
 
+            # Write solution information
+            CameraCalibration.camWriter.write("{},{},{},{}".format(k,
+                                                                   correction_iteration,
+                                                                   allignment_error,
+                                                                   utils.focalToFOV(K[0,0], h_org / 2)
+                                                                   ))
+
             print(k)
             print("Rotation Rodrigues {}".format(rvec))
 
@@ -256,3 +280,5 @@ class CameraCalibration:
 
             print("Rotation Euler Angles {}".format(rvec))
             print("Translation {}".format(tvec))
+
+            #endregion

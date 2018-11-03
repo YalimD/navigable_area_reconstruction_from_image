@@ -5,6 +5,7 @@ from matplotlib.pyplot import ion
 import skimage.transform as transform
 import math
 import argparse
+import utils
 
 from horizon_detection import horizon_detector
 from camera_calibration import cameraCalibration
@@ -241,28 +242,18 @@ def mouse_handler(event, x, y, flags, data):
             cv2.imshow(data['windowName'], data['image'])
 
 
-# Finds the normalized cross product of two elements in homogenous coordinates
-def normalizedCross(elem1, elem2):
-
-    c = np.cross(elem1, elem2)
-    return c / c[2]
-
-def focalToFOV(focal, height):
-
-    return math.degrees(2 * math.atan2(height , (2 * focal)))
-
 
 def processGTlines(data):
 
-    lineA = normalizedCross(*data['points'][0:2])
-    lineB = normalizedCross(*data['points'][2:4])
-    point1 = list(map(lambda x: int(x), normalizedCross(lineA, lineB)))
+    lineA = utils.normalizedCross(*data['points'][0:2])
+    lineB = utils.normalizedCross(*data['points'][2:4])
+    point1 = list(map(lambda x: int(x), utils.normalizedCross(lineA, lineB)))
 
-    lineA = normalizedCross(*data['points'][4:6])
-    lineB = normalizedCross(*data['points'][6:8])
-    point2 = list(map(lambda x: int(x), normalizedCross(lineA, lineB)))
+    lineA = utils.normalizedCross(*data['points'][4:6])
+    lineB = utils.normalizedCross(*data['points'][6:8])
+    point2 = list(map(lambda x: int(x), utils.normalizedCross(lineA, lineB)))
 
-    horizon = normalizedCross(point1, point2)
+    horizon = utils.normalizedCross(point1, point2)
 
     # As every line pair represents the two heads, every even/odd point creates a pair to be used
     # for a zenith vanishing point
@@ -303,6 +294,7 @@ def rectify_groundPlane(image_path,
                         frames_per_check,
                         ground_truth_horizon,
                         ground_truth_zenith,
+                        ground_truth_focal,
                         draw_features):
 
     # Manuel testing debugging part:
@@ -310,7 +302,8 @@ def rectify_groundPlane(image_path,
     height, width, _ = image.shape
     segmented_img = cv2.imread(segmented_img_path)
 
-    if ground_truth_horizon is None:
+    if ground_truth_horizon is None or ground_truth_zenith is None or ground_truth_focal is None :
+
         clicked_points = {}
         clicked_points['image'] = np.copy(image)
         clicked_points['points'] = []
@@ -333,7 +326,7 @@ def rectify_groundPlane(image_path,
     print("Ground-truth zenith vp {}".format(ground_truth_zenith))
     print("Ground-truth focal length {}".format(ground_truth_focal))
 
-    ground_fov = focalToFOV(ground_truth_focal, height)
+    ground_fov = utils.focalToFOV(ground_truth_focal[0], height)
 
     print("Ground-truth fov {}".format(ground_fov))
 
@@ -431,7 +424,7 @@ def rectify_groundPlane(image_path,
             zenith_vp = zenith_vp / zenith_vp[2]
 
             fov = math.degrees(2 * math.atan2(height , (2 * focal_length)))
-            fov = focalToFOV(focal_length, height)
+            fov = utils.focalToFOV(focal_length, height)
 
             print("Method: {}, left: {}, right: {}".format(k, leftVP[:2], rightVP[:2]))
             print("Zenith: {}, focal: {} with fov: {}".format(zenith_vp[:2], focal_length, fov))
@@ -541,6 +534,8 @@ if __name__ == "__main__":
     aparser.add_argument("--ground_truth_horizon", nargs='+', help = "Homogenous coordinates of the ground truth, all 3 coordinates",
                          type=float, default = None)
     aparser.add_argument("--ground_truth_zenith", nargs='+', help = "Zenith VP coordinates of the ground truth",
+                         type=float, default = None)
+    aparser.add_argument("--ground_truth_focal", nargs='+', help = "Focal length of the ground truth",
                          type=float, default = None)
     aparser.add_argument("--draw_features", nargs='+', help = "Draw the postures, image lines and such features on the image when determining the horizon",
                          type=bool, default=False)
