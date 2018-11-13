@@ -2,6 +2,7 @@ import cv2
 import numpy as np
 import math
 import sys
+from matplotlib import pyplot as plt
 
 from sklearn import linear_model
 from skimage import transform, feature
@@ -9,6 +10,11 @@ from skimage import transform, feature
 __all__ = ["HorizonDetectorLib"]
 
 class HorizonDetectorLib:
+
+    # Threshold to be used for computing inliers in degrees.Angle between
+    # edgelet direction and vanishing point is thresholded.
+    threshold_inlier = 10
+    ransac_iteration = 10000
 
     # Extracts the edges and hough lines from the image
     # Taken from IMAGE RECTIFICATION
@@ -27,8 +33,8 @@ class HorizonDetectorLib:
         grayscale_img = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
         edges = feature.canny(grayscale_img, 3)
         # Parameter: Parameter
-        line_segments = transform.probabilistic_hough_line(edges,   line_length=110,
-                                                                    line_gap=30)
+        line_segments = transform.probabilistic_hough_line(edges,   line_length = 80,
+                                                                    line_gap = 10)
 
         # Edge detection (canny for now)
         # grayscale_img = cv2.Canny(grayscale_img, threshold1=75, threshold2=200, apertureSize=3)
@@ -52,11 +58,12 @@ class HorizonDetectorLib:
     # In addition, Using the pedestrian postures, determine the orthogonal vanishing point using RANSAC for minimizing
     # distance between candidate line pairs
     @staticmethod
-    def parse_pedestrian_detection(image, detection_data, frames_per_check=30, use_bounding_boxes=True, feet_only=False,
-                                   tracker_id=None, returnPosture=False):
+    def parse_pedestrian_detection(image, detection_data, frames_per_check=30,
+                                   tracker_id=None):
         latest_loc = {}
         paths = []
         postures = []
+        trajectories = []
 
         num_of_frames = 0
         latest_frame = 0
@@ -83,16 +90,11 @@ class HorizonDetectorLib:
                 if (agent[1] not in latest_loc.keys() or num_of_frames - (latest_loc[agent[1]])[2] >= frames_per_check) \
                         and (tracker_id is None or (int(agent[1]) in tracker_id)):
 
-
                     # Different methods for extracting head and feet
-                    if not use_bounding_boxes:
-                        # Add the agent id to the dictionary latest_loc
-                        headPos = list(map(float, agent[-2].split('/')))
-                        feetPos = list(map(float, agent[-1].split('/')))
-                    else:
-                        pos = list(map(float, agent[2:6]))
-                        headPos = [pos[0] + pos[2] / 2, pos[1]]
-                        feetPos = [pos[0] + pos[2] / 2, pos[1] + pos[3]]
+
+                    # Add the agent id to the dictionary latest_loc
+                    headPos = list(map(float, agent[-2].split('/')))
+                    feetPos = list(map(float, agent[-1].split('/')))
 
                     try:
                         prev_pos = latest_loc[agent[1]]
@@ -109,66 +111,24 @@ class HorizonDetectorLib:
                         higher_position = (headPos[1] + feetPos[1]) / 2 < (prev_pos[0][1] + prev_pos[1][1]) / 2
 
                         if size_increased ^ higher_position:
+
                             # The paths are held as pairs
                             paths.append(feet_path)
-                            if not feet_only:
-                                paths.append(head_path)
+                            trajectories.append(feet_path)
+                            paths.append(head_path)
 
-                            if returnPosture:
-                                postures.append([headPos, feetPos])
+                            postures.append([headPos, feetPos])
                             latest_loc[agent[1]] = [headPos, feetPos, num_of_frames]
 
                     except:
                         latest_loc[agent[1]] = [headPos, feetPos, num_of_frames]
 
-
-                # else:
-                #
-                #     # if i == 0:
-                #     #     l = line.split()
-                #     #     fps = int(l[-1])
-                #     #     resize = int(l[-2])
-                #     # # Parse the pedestrian location
-                #     # elif i - 1 == frame_index * fps * seconds_per_check:
-                #     #     frame_index += 1
-                #     #     locations = line.split(",")[1:]
-                #     #
-                #     #     # Every 7 values is an agent
-                #     #     agents = [locations[i * 7:(i + 1) * 7] for i in range(len(locations) // 7)]
-                #     #
-                #     #     for agent in agents:
-                #     #
-                #     #         #Current agent
-                #     #         headPos = (int(int(agent[1]) * resize),(float(agent[2]) - float(agent[6]) / 2) * resize)
-                #     #         feetPos = (int(int(agent[1]) * resize),(float(agent[2]) + float(agent[6]) / 2) * resize)
-                #     #
-                #     #         try:
-                #     #             #If the agent id is not found in the dictionary, this will raise KeyError
-                #     #             prev_pos = latest_loc[agent[0]]
-                #     #
-                #     #             head_path = [prev_pos[0], headPos]
-                #     #             feet_path = [prev_pos[1], feetPos]
-                #     #
-                #     #             #Detect and remove outliers.
-                #     #             #Outliers are inconsistent detection box sizes. For example, a detection box that
-                #     #             #shrinks while getting closer to the camera is considered as an outlier
-                #     #             currentHeight = feetPos[1] - headPos[1]
-                #     #             prev_height = prev_pos[1][1] - prev_pos[0][1]
-                #     #             size_increased = currentHeight > prev_height
-                #     #             higher_position = (headPos[1] + feetPos[1])/2 < (prev_pos[0][1] + prev_pos[1][1])/2
-                #     #
-                #     #             if size_increased ^ higher_position:
-                #     #                 # The paths are held as pairs
-                #     #                 paths.extend((head_path, feet_path))
-                #     #                 latest_loc[agent[0]] = [headPos, feetPos]
-                #     #
-                #     #         except KeyError:
-                #     #             latest_loc[agent[0]] = [headPos, feetPos]
-
         detections.close()
 
         return HorizonDetectorLib.lineProperties(paths, image), \
-               HorizonDetectorLib.lineProperties(postures, image)
+               HorizonDetectorLib.lineProperties(postures, image), \
+               HorizonDetectorLib.lineProperties(trajectories, image)
+
 
 
     # Extracts the line properties from given line segments
@@ -186,14 +146,17 @@ class HorizonDetectorLib:
             if len(line) > 4: #Homogenous coordinates are given
                 line = line[:2] + line[3:5]
 
-            x0 = int(line[0]);
+            x0 = int(line[0])
             y0 = int(line[1])
-            x1 = int(line[2]);
+            x1 = int(line[2])
             y1 = int(line[3])
 
-            line_centers.append(((x0 + x1) / 2, (y0 + y1) / 2))
-            line_directions.append((x1 - x0, y1 - y0))
-            line_strengths.append(np.linalg.norm([x1 - x0, y1 - y0]))
+            # Filter points
+            if (y1 - y0 and x1 - x0) != 0:
+                line_centers.append(((x0 + x1) / 2, (y0 + y1) / 2))
+                line_directions.append((x1 - x0, y1 - y0))
+                line_strengths.append(np.linalg.norm([x1 - x0, y1 - y0]))
+
 
             # Draw the detected lines on the original image
             # cv2.line(image, (x0, y0), (x1, y1), (0, 0, 255), 1)
@@ -203,6 +166,7 @@ class HorizonDetectorLib:
         if len(line_directions) > 0:
             line_directions = np.array(line_directions) / \
                               (np.linalg.norm(line_directions, axis=1)[:, np.newaxis] + sys.float_info.epsilon)
+
 
         # cv2.imshow("Extracted Lines", image)
         # cv2.waitKey(0)
@@ -232,6 +196,7 @@ class HorizonDetectorLib:
         p = -np.sum(locations * normals, axis=1)
         lines = np.concatenate((normals, p[:, np.newaxis]), axis=1)
         return lines
+
 
 
     # Takes horizon vertices and zenith vp in homogenous coordinates
@@ -280,8 +245,8 @@ class HorizonDetectorLib:
     # which will determine the horizon
     # TODO: Parameters for thresholds
     @staticmethod
-    def determineVP(path_lines, image, plot_axis, ground_truth,
-                    asTrajectory=False,  draw_features = False):
+    def determineVP(path_lines, plot_axis, ground_truth,
+                    postures = None,  draw_features = False):
 
         centers, directions, strengths = path_lines
 
@@ -293,92 +258,61 @@ class HorizonDetectorLib:
                                [centers[i][1] - (directions[i][1] * strengths[i]),
                                 centers[i][1] + (directions[i][1] * strengths[i])], 'r-')
 
-        vxs = []
-        vys = []
 
-        if not asTrajectory:
+        # Using RANSAC method on trajectories
+        model = HorizonDetectorLib.ransac_vanishing_point(path_lines)
+        vp1 = model / model[2]
+        plot_axis.plot(vp1[0], vp1[1], 'bo')
 
-            normals = HorizonDetectorLib.edgelet_lines(path_lines)
+        # Parameter: Ransac inlier threshold 30 seems to hit the spot
+        # Before determining the second VP, remove inliers as they already contributed to first VP
+        path_lines = HorizonDetectorLib.remove_inliers(vp1, path_lines)
 
-            for i in range(len(normals) // 2):
+        # Find second vanishing point
+        model2 = HorizonDetectorLib.ransac_vanishing_point(path_lines)
+        vp2 = model2 / model2[2]
+        plot_axis.plot(vp2[0], vp2[1], 'bo')
 
-                head = normals[2 * i]
-                feet = normals[2 * i + 1]
+        # Test if we can find the zenith vanishing point
+        # Before determining the second VP, remove inliers as they already contributed to first VP
+        path_lines = HorizonDetectorLib.remove_inliers(vp2, path_lines)
 
-                vx, vy, n = np.cross(head, feet);
-                vx /= n
-                vy /= n
-                if math.isfinite(vx) and math.isfinite(vy):
-                    vxs.append(vx)
-                    vys.append(vy)
-                    plot_axis.plot([vx], [vy], 'bo')
+        # Find nadir
 
-            # Use RANSAC to determine the vanishing line
-            sorted_ind = np.argsort(vys)
-            sorted_ind = sorted_ind[:int(len(sorted_ind))]
+        # If postures are provided, use them
+        # Else continue using the hough lines
+        if postures is not None:
+            path_lines = postures
 
-            vxs = np.array(vxs).reshape(-1, 1)[sorted_ind]
-            vys = np.array(vys).reshape(-1, 1)[sorted_ind]
+        model3 = HorizonDetectorLib.ransac_vanishing_point(path_lines)
+        vp3 = model3 / model3[2]
+        plot_axis.plot(vp3[0], vp3[1], 'bo')
 
-            ransac = linear_model.RANSACRegressor()
-            ransac.fit(vxs, vys)
-            line_X = np.arange(vxs.min(), vxs.max())[:, np.newaxis]
-            line_Y = ransac.predict(line_X)
+        # # Parameter: Only use for debugging, overcrowds the image if used
+        #
+        # for i in range(centers.shape[0]):
+        #     xax = [centers[i, 0], vp1[0]]
+        #     yax = [centers[i, 1], vp1[1]]
+        #     plot_axis.plot(xax, yax, 'b-.')
+        #
+        #     xax = [centers[i, 0], vp2[0]]
+        #     yax = [centers[i, 1], vp2[1]]
+        #     plot_axis.plot(xax, yax, 'b-.')
 
-            vp_left = (line_X[0][0], line_Y[0][0], 1)
-            vp_right = (line_X[-1][0], line_Y[-1][0], 1)
-            vp_zenith = None #We find the zenith vanishing point elsewhere, but I think the method below is better
+        # The vanishing point with highest y value is taken as the zenith 8as we are looking at the world birdview)
+        vanishers = [vp1,vp2,vp3]
+        vanishers.sort(key=lambda v: v[1])
+        horizon_points = vanishers[:2]
+        horizon_points.sort(key=lambda v:v[0])
 
-        else:
+        vp_left, vp_right, vp_zenith = horizon_points[0], horizon_points[1], vanishers[2]
 
-            # Using RANSAC method on trajectories
-            model = HorizonDetectorLib.ransac_vanishing_point(path_lines)
-            vp1 = model / model[2]
-            plot_axis.plot(vp1[0], vp1[1], 'bo')
+        line_X = np.arange(vp_left[0], vp_right[0])[:, np.newaxis]
+        horizon_line = np.cross(vp_left,vp_right)
+        horizon_line = horizon_line / horizon_line[2]
 
-            # Parameter: Ransac inlier threshold
-            # Before determining the second VP, remove inliers as they already contributed to first VP
-            path_lines_reduced = HorizonDetectorLib.remove_inliers(vp1, path_lines, 30)
-
-            # Find second vanishing point
-            model2 = HorizonDetectorLib.ransac_vanishing_point(path_lines_reduced)
-            vp2 = model2 / model2[2]
-            plot_axis.plot(vp2[0], vp2[1], 'bo')
-
-            # Test if we can find the zenith vanishing point
-            # Before determining the second VP, remove inliers as they already contributed to first VP
-            path_lines_reduced_again = HorizonDetectorLib.remove_inliers(vp2, path_lines_reduced, 60)
-
-            # Find zenith
-            model3 = HorizonDetectorLib.ransac_vanishing_point(path_lines_reduced_again)
-            vp3 = model3 / model3[2]
-            plot_axis.plot(vp3[0], vp3[1], 'bo')
-
-            # # Parameter: Only use for debugging, overcrowds the image if used
-            #
-            # for i in range(centers.shape[0]):
-            #     xax = [centers[i, 0], vp1[0]]
-            #     yax = [centers[i, 1], vp1[1]]
-            #     plot_axis.plot(xax, yax, 'b-.')
-            #
-            #     xax = [centers[i, 0], vp2[0]]
-            #     yax = [centers[i, 1], vp2[1]]
-            #     plot_axis.plot(xax, yax, 'b-.')
-
-            # The vanishing point with highest y value is taken as the zenith 8as we are looking at the world birdview)
-            vanishers = [vp1,vp2,vp3]
-            vanishers.sort(key=lambda v: v[1])
-            horizon_points = vanishers[:2]
-            horizon_points.sort(key=lambda v:v[0])
-
-            vp_left, vp_right, vp_zenith = horizon_points[0], horizon_points[1], vanishers[2]
-
-            line_X = np.arange(vp_left[0], vp_right[0])[:, np.newaxis]
-            horizon_line = np.cross(vp_left,vp_right)
-            horizon_line = horizon_line / horizon_line[2]
-
-            # line_X = [[vp_left[0], vp_right[0]]]
-            line_Y = list(map(lambda point: (-horizon_line[0] * point[0] - horizon_line[2]) / horizon_line[1], line_X))
+        # line_X = [[vp_left[0], vp_right[0]]]
+        line_Y = list(map(lambda point: (-horizon_line[0] * point[0] - horizon_line[2]) / horizon_line[1], line_X))
 
         plot_axis.plot(line_X, line_Y, color='r')
 
@@ -392,11 +326,9 @@ class HorizonDetectorLib:
 
         return [vp_left, vp_right, vp_zenith, r_mse]
 
-
-    # Problem: The zenith vanishing point appears at the same side of the vanishing line against center of the image, which is impossible
-    # Solution: Find the distance to both and if distance to center is longer than the distance to horizon, ignore model
+    # Using posture data, finds zenith vanishing point
     @staticmethod
-    def ransac_zenith_vp(edgelets, horizon, image_center, num_ransac_iter=2000, threshold_inlier=5, zenith = None):
+    def ransac_zenith_vp(edgelets, horizon, image_center):
 
         # If no zenith vp is given, calculate it from postures and image lines
         locations, directions, strengths = edgelets
@@ -404,27 +336,25 @@ class HorizonDetectorLib:
 
         num_pts = strengths.size
 
-        arg_sort = np.argsort(-strengths)
-        # If number of points is lower than a threshold, don't create index spaces to compare models
-        first_index_space = arg_sort if num_pts < 20 else arg_sort[:num_pts // 5]  # Top 25 percentile
-        second_index_space = arg_sort if num_pts < 20 else arg_sort[:num_pts // 2]  # Top 50 percentile
+        angleRange = HorizonDetectorLib.generate_angles_histogram(directions)
 
-        best_model = zenith
+        first_index_space = second_index_space = angleRange
+
+        best_model = None
         best_votes = np.zeros(num_pts)
 
         # Normalize the horizon
         horizon_homogenous = np.cross(horizon[0], horizon[1])
 
         # These two are actually the same
-        # horizon_homogenous = horizon_homogenous / np.sqrt(horizon_homogenous[0] ** 2 + horizon_homogenous[1] ** 2)
         horizon_homogenous = horizon_homogenous / horizon_homogenous[2]
 
         if best_model is None:
-            for ransac_iter in range(num_ransac_iter):
+            for ransac_iter in range(HorizonDetectorLib.ransac_iteration):
                 ind1 = np.random.choice(first_index_space)
                 ind2 = np.random.choice(second_index_space)
 
-                while ind2 == ind1:  # Protection against low line count
+                while ind2 == ind1 and len(angleRange) != 1:  # Protection against low line count
                     ind2 = np.random.choice(second_index_space)
 
                 l1 = lines[ind1]
@@ -433,16 +363,17 @@ class HorizonDetectorLib:
                 current_model = np.cross(l1, l2)  # Potential vanishing point
                 current_model = current_model / current_model[2]
 
+                #TODO: Delete?
                 # Its distance to center and the horizon
                 horizon_distance = np.abs(np.dot(current_model.T, horizon_homogenous))
                 centre_distance = np.linalg.norm(current_model[:2] - image_center[:2])
 
-                if np.sum(current_model ** 2) < 1 or current_model[2] == 0 :
+                if np.sum(current_model ** 2) < 1 or current_model[2] == 0:
                     # reject degenerate candidates, which lie on the wrong side of the horizon
                     continue
 
                 current_votes = HorizonDetectorLib.compute_votes(
-                    edgelets, current_model, threshold_inlier)
+                    edgelets, current_model)
 
                 if current_votes.sum() > best_votes.sum():
                     best_model = current_model
@@ -450,14 +381,35 @@ class HorizonDetectorLib:
                     # logging.info("Current best model has {} votes at iteration {}".format(
                     #     current_votes.sum(), ransac_iter))
 
-        # Calculate the focal length
-        zenith = best_model
-        focal_length = HorizonDetectorLib.find_focal_length(horizon, zenith)
+        return best_model
 
-        return zenith, focal_length, image_center
 
     @staticmethod
-    def ransac_vanishing_point(edgelets, num_ransac_iter=2000, threshold_inlier=5):
+    def generate_angles_histogram(directions):
+
+        # The search space is initiated as the peak of the current histogram
+        angles = list(map(lambda line: np.rad2deg(np.arctan(line[1] / line[0])),
+                          directions))
+
+        sorted_angles , histogram, _ = plt.hist(angles, bins=36, range=(-90, 90))
+        max_angle = -90 + np.argmax(sorted_angles) * 5 + 2.5
+
+        # Visualize the histogram Test area
+        # fig, axis = plt.subplots()
+        # plt.plot(histogram)
+        # plt.axis([-90, 90, 0, sorted_angles[np.argmax(sorted_angles)] + 10])
+        # plt.show()
+
+
+        arg_sort = np.argsort(angles)
+
+        arg_sort = [index for index in arg_sort if angles[index] <= (max_angle + 2.5)
+                                                and angles[index] >= (max_angle - 2.5)]
+
+        return arg_sort
+
+    @staticmethod
+    def ransac_vanishing_point(edgelets):
         """Estimate vanishing point using Ransac.
 
         Parameters
@@ -466,8 +418,6 @@ class HorizonDetectorLib:
             (locations, directions, strengths) as computed by `compute_edgelets`.
         num_ransac_iter: int
             Number of iterations to run ransac.
-        threshold_inlier: float
-            threshold to be used for computing inliers in degrees.
 
         Returns
         -------
@@ -480,23 +430,25 @@ class HorizonDetectorLib:
         "Auto-rectification of user photos." 2014 IEEE International Conference on
         Image Processing (ICIP). IEEE, 2014.
         """
+
         locations, directions, strengths = edgelets
         lines = HorizonDetectorLib.edgelet_lines(edgelets)
 
         num_pts = strengths.size
 
-        arg_sort = np.argsort(-strengths)
-        first_index_space = arg_sort if num_pts < 20 else arg_sort[:num_pts // 5]  # Top 20 percentile
-        second_index_space = arg_sort if num_pts < 20 else arg_sort[:num_pts // 2]  # Top 50 percentile
+        angleRange = HorizonDetectorLib.generate_angles_histogram(directions)
+
+        first_index_space = second_index_space = angleRange
 
         best_model = None
         best_votes = np.zeros(num_pts)
 
-        for ransac_iter in range(num_ransac_iter):
+        for ransac_iter in range(HorizonDetectorLib.ransac_iteration):
+
             ind1 = np.random.choice(first_index_space)
             ind2 = np.random.choice(second_index_space)
 
-            while ind2 == ind1:  # Protection against low line count
+            while ind2 == ind1 and len(angleRange) != 1:  # Protection against low line count
                 ind2 = np.random.choice(second_index_space)
 
             l1 = lines[ind1]
@@ -509,7 +461,7 @@ class HorizonDetectorLib:
                 continue
 
             current_votes = HorizonDetectorLib.compute_votes(
-                edgelets, current_model, threshold_inlier)
+                edgelets, current_model)
 
             if current_votes.sum() > best_votes.sum():
                 best_model = current_model
@@ -520,7 +472,7 @@ class HorizonDetectorLib:
         return best_model
 
     @staticmethod
-    def compute_votes(edgelets, model, threshold_inlier=5):
+    def compute_votes(edgelets, model):
         """Compute votes for each of the edgelet against a given vanishing point.
 
         Votes for edgelets which lie inside threshold are same as their strengths,
@@ -531,11 +483,7 @@ class HorizonDetectorLib:
         edgelets: tuple of ndarrays
             (locations, directions, strengths) as computed by `compute_edgelets`.
         model: ndarray of shape (3,)
-            Vanishing point model in homogenous cordinate system.
-        threshold_inlier: float
-            Threshold to be used for computing inliers in degrees. Angle between
-            edgelet direction and line connecting the  Vanishing point model and
-            edgelet location is used to threshold.
+            Vanishing point model in homogenous cordinate system
 
         Returns
         -------
@@ -556,11 +504,11 @@ class HorizonDetectorLib:
         cosine_theta = dot_prod / (abs_prod + sys.float_info.epsilon)
         theta = np.arccos(np.abs(cosine_theta))
 
-        theta_thresh = threshold_inlier * np.pi / 180
+        theta_thresh = HorizonDetectorLib.threshold_inlier * np.pi / 180
         return (theta < theta_thresh) * strengths
 
     @staticmethod
-    def remove_inliers(model, edgelets, threshold_inlier=10):
+    def remove_inliers(model, edgelets):
         """Remove all inlier edglets of a given model.
 
         Parameters
@@ -570,15 +518,13 @@ class HorizonDetectorLib:
             reestimated.
         edgelets: tuple of ndarrays
             (locations, directions, strengths) as computed by `compute_edgelets`.
-        threshold_inlier: float
-            threshold to be used for finding inlier edgelets.
 
         Returns
         -------
         edgelets_new: tuple of ndarrays
             All Edgelets except those which are inliers to model.
         """
-        inliers = HorizonDetectorLib.compute_votes(edgelets, model, threshold_inlier) > 0
+        inliers = HorizonDetectorLib.compute_votes(edgelets, model) > 0
         locations, directions, strengths = edgelets
         locations = locations[~inliers]
         directions = directions[~inliers]

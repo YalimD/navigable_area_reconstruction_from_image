@@ -29,16 +29,17 @@ class CameraCalibration:
         col = "rgb"
         model_on_image = []
 
-        plt.clf()
-        plt.title("The resulting placement from " + horizon_method)
-        plt.imshow(image)
+        fig, ax = plt.subplots()
+
+        ax.set_title("The resulting placement from " + horizon_method)
+        ax.imshow(image)
 
         # Visualize the model endpoints with axes
         for center in model_points:
 
             center_offset = 100
             model_normal = np.float64([center, np.add([center_offset, 0, 0], center),
-                                       np.add([0, center_offset, 0], center),
+                                       np.add([0, -center_offset, 0], center),
                                        np.add([0, 0, center_offset], center)])
 
             (normal, _) = cv2.projectPoints(model_normal,
@@ -50,15 +51,15 @@ class CameraCalibration:
             normal = [x[0] for x in normal]
 
             for i in range(len(normal) - 1):
-                plt.plot([normal[0][0], normal[i + 1][0]],
+                ax.plot([normal[0][0], normal[i + 1][0]],
                          [normal[0][1], normal[i + 1][1]],
                          col[i])
 
             model_on_image.append(normal[0])
 
-        plt.show()
+        plt.show(fig)
 
-        return np.array(model_on_image)
+        return np.array(model_on_image), fig
 
     @staticmethod
     def extractCameraParameters(horizon_method, image, warped_img, model_points, image_points, K):
@@ -127,7 +128,7 @@ class CameraCalibration:
             temp_image_points = np.float64([[x] for x in image_points])
             temp_model_points = np.float64([[x[0], 0, h_warped_large - x[1]] for x in model_points_large])
 
-            number_of_corrections = 50
+            number_of_corrections = 100
             allignment_error = np.inf #In pixel distance
             allignment_error_threshold = 3
 
@@ -140,8 +141,6 @@ class CameraCalibration:
 
             for _ in range(number_of_corrections):
 
-
-
                 # Solve the pnp problem, and determine the image location of
                 # endpoints of the model
                 _ret, rvec, tvec = cv2.solvePnP(
@@ -149,13 +148,24 @@ class CameraCalibration:
                     K, dist_coef,
                     flags=pnp_method)
 
+                for _ in range(10):
+                    _ret, rvec, tvec = cv2.solvePnP(
+                        temp_model_points, temp_image_points,
+                        K, dist_coef,
+                        rvec, tvec,
+                        useExtrinsicGuess = True,
+                        flags=pnp_method)
+
                 # Display the result of the solution and return the points of the model on the image
-                model_on_image = CameraCalibration.displayPlacement(image,
+                model_on_image, result_fig = CameraCalibration.displayPlacement(image,
                                                                     temp_model_points,
                                                                     rvec, tvec,
                                                                     K, dist_coef,
-                                                                    horizon_method + "-" + k +
-                                                                    " - err:" + str(allignment_error))
+                                                                    horizon_method + "_" + k +
+                                                                    " - err:" + "{0:.2f}".format(allignment_error))
+
+                if correction_iteration == 0:
+                    result_fig.savefig("placement_axes_" + horizon_method + "_initial.png")
 
                 adjustment_homography, status = cv2.findHomography(model_on_image, temp_image_points)
 
@@ -169,7 +179,7 @@ class CameraCalibration:
                     wrapped_model = transform.matrix_transform(wrapped_model, adjustment_homography)
                     wrapped_model = np.array(list(map(lambda x: [x[0], 0, h_warped_large - x[1]], wrapped_model)))
 
-                    model_update_coefficient = 0.5
+                    model_update_coefficient = 0.3
                     temp_model_points = temp_model_points * (1 - model_update_coefficient) +\
                                         wrapped_model * model_update_coefficient
 
@@ -179,6 +189,16 @@ class CameraCalibration:
 
                     # If the distance between points is smaller than a threshold, stop
                     if allignment_error < allignment_error_threshold:
+
+                        # Display and save for one last time
+                        _, result_fig = CameraCalibration.displayPlacement( image,
+                                                            temp_model_points,
+                                                            rvec, tvec,
+                                                            K, dist_coef,
+                                                            horizon_method + "-" + k +
+                                                            " - err:" + str(allignment_error))
+
+                        result_fig.savefig("placement_axes_" + horizon_method + "_final.png")
                         break
                 else:
                     break
@@ -265,7 +285,7 @@ class CameraCalibration:
             CameraCalibration.camWriter.write("{},{},{},{}".format(k,
                                                                    correction_iteration,
                                                                    allignment_error,
-                                                                   utils.focalToFOV(K[0,0], h_org / 2)
+                                                                   utils.focalToFOV(K[0,0], h_org)
                                                                    ))
 
             print(k)
