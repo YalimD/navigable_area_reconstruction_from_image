@@ -148,13 +148,13 @@ class CameraCalibration:
                     K, dist_coef,
                     flags=pnp_method)
 
-                for _ in range(10):
-                    _ret, rvec, tvec = cv2.solvePnP(
-                        temp_model_points, temp_image_points,
-                        K, dist_coef,
-                        rvec, tvec,
-                        useExtrinsicGuess = True,
-                        flags=pnp_method)
+                # for _ in range(10):
+                #     _ret, rvec, tvec = cv2.solvePnP(
+                #         temp_model_points, temp_image_points,
+                #         K, dist_coef,
+                #         rvec, tvec,
+                #         useExtrinsicGuess = True,
+                #         flags=pnp_method)
 
                 # Display the result of the solution and return the points of the model on the image
                 model_on_image, result_fig = CameraCalibration.displayPlacement(image,
@@ -179,7 +179,7 @@ class CameraCalibration:
                     wrapped_model = transform.matrix_transform(wrapped_model, adjustment_homography)
                     wrapped_model = np.array(list(map(lambda x: [x[0], 0, h_warped_large - x[1]], wrapped_model)))
 
-                    model_update_coefficient = 0.3
+                    model_update_coefficient = 0.1
                     temp_model_points = temp_model_points * (1 - model_update_coefficient) +\
                                         wrapped_model * model_update_coefficient
 

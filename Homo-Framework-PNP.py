@@ -270,7 +270,7 @@ def processGTlines(data):
     horizon = utils.normalizedCross(point1, point2)
 
     # As every line pair represents the two heads, every even/odd point creates a pair to be used
-    # for a zenith vanishing point
+    # for a nadir vanishing point
 
     zenith_lines = []
 
@@ -279,7 +279,7 @@ def processGTlines(data):
     zenith_lines.append([data['points'][4], data['points'][6]])
     zenith_lines.append([data['points'][5], data['points'][7]])
 
-    # Give those pairs to horizon library to obtain a zenith vanishing point
+    # Give those pairs to horizon library to obtain a nadir vanishing point
     zenith_edgelets = horizon_detector.HorizonDetectorLib.lineProperties(zenith_lines, data['image'])
     ground_zenith = horizon_detector.HorizonDetectorLib.ransac_zenith_vp(zenith_edgelets,
                                                                          horizon_points,
@@ -290,7 +290,7 @@ def processGTlines(data):
 
     fig, axis = plt.subplots()
     axis.imshow(data['image'])
-    axis.set_title("Ground truth horizon and zenith")
+    axis.set_title("Ground truth horizon and nadir")
 
     axis.plot((point1[0]), (point1[1]), 'ro')
     axis.plot((point2[0]), (point2[1]), 'ro')
@@ -347,7 +347,7 @@ def rectify_groundPlane(image_path,
         cv2.waitKey(5)
 
     print("Ground-truth vanishing line {}".format(ground_truth_horizon))
-    print("Ground-truth zenith vp {}".format(ground_truth_zenith))
+    print("Ground-truth nadir vp {}".format(ground_truth_zenith))
     print("Ground-truth focal length {}".format(ground_truth_focal))
     print("Ground-truth horizon corners {}".format(ground_truth_horizon_pnts))
 
@@ -365,7 +365,7 @@ def rectify_groundPlane(image_path,
     pedestrian_posture_paths, pedestrian_postures, pedestrian_posture_trajectory = \
         horizon_detector.HorizonDetectorLib.parse_pedestrian_detection(np.copy(image),
                                     detection_data_file,
-                                    frames_per_check)
+                                    65)
 
     # Single posture implementation requires pedestrian ID's
     pedestrian_posture_paths_single, pedestrian_postures_single, pedestrian_posture_trajectory_single = \
@@ -389,8 +389,12 @@ def rectify_groundPlane(image_path,
         # 'single_lines': [pedestrian_posture_paths_single, pedestrian_postures_single,
         #                  pedestrian_posture_trajectory_single],
         # 'hough': [image_lines, None, None],
-        'postures_hough': [[np.concatenate((pedestrian_posture_paths[j], image_lines[j]), axis=0)
-                              for j in range(3)], pedestrian_postures, pedestrian_posture_trajectory]
+        'postures_hough': [
+                            [np.concatenate((pedestrian_posture_paths[j], image_lines[j]), axis=0)
+                              for j in range(3)],
+                            [np.concatenate((pedestrian_postures[j], image_lines[j]), axis=0)
+                             for j in range(3)],
+                            pedestrian_posture_trajectory],
     }
 
     row = int(np.sqrt(len(vp_determination_methods.keys())))
@@ -419,9 +423,10 @@ def rectify_groundPlane(image_path,
 
             leftVP, rightVP, zenith_vp, r_mse = horizon_detector.HorizonDetectorLib.determineVP(
                                                              lines,
+                                                             center,
                                                              plot_axis= plot_axis,
                                                              ground_truth= ground_truth_horizon,
-                                                             postures = vp_determination_methods[k][1],
+                                                             postures = postures,
                                                              draw_features = draw_features)
 
             plot_axis.set_title(str(k) + " RMSE: " + str(r_mse))
@@ -450,7 +455,7 @@ def rectify_groundPlane(image_path,
             plot_axis.plot((ground_truth_zenith[0]), (ground_truth_zenith[1]), 'go')
 
             print("Method: {}, left: {}, right: {}".format(k, leftVP[:2], rightVP[:2]))
-            print("Zenith: {}, focal: {} with fov: {}".format(zenith_vp[:2], focal_length, fov))
+            print("nadir: {}, focal: {} with fov: {}".format(zenith_vp[:2], focal_length, fov))
 
             # Determine the region under the horizon in the image
             # as rectifying the image above horizon
@@ -484,8 +489,6 @@ def rectify_groundPlane(image_path,
 
             # endregion
 
-
-
             # Complete stratified approach that rectifies and translates the navigable area
             warped_result, model_points, H = compute_homography_and_warp(segmented_img,
                                                                          list(leftVP),
@@ -497,7 +500,7 @@ def rectify_groundPlane(image_path,
             # region result_validation
 
             # There are some constraints on the resulting fov and found horizon
-            # - As the videos are taken from a high altitude, the zenith is expected to be below the horizon (birdview)
+            # - As the videos are taken from a high altitude, the nadir is expected to be below the horizon (birdview)
             # - The rectified region should be a convex polygon
             # If any of them is not satisfied, then the original image should be returned
 
@@ -559,7 +562,7 @@ if __name__ == "__main__":
                          type=int, default=60)
     aparser.add_argument("--ground_truth_horizon", nargs='+', help = "Homogenous coordinates of the ground truth, all 3 coordinates",
                          type=float, default = None)
-    aparser.add_argument("--ground_truth_zenith", nargs='+', help = "Zenith VP coordinates of the ground truth",
+    aparser.add_argument("--ground_truth_zenith", nargs='+', help = "nadir VP coordinates of the ground truth",
                          type=float, default = None)
     aparser.add_argument("--ground_truth_focal", help = "Focal length of the ground truth",
                          type=float, default = None)
