@@ -128,80 +128,64 @@ class CameraCalibration:
             temp_image_points = np.float64([[x] for x in image_points])
             temp_model_points = np.float64([[x[0], 0, h_warped_large - x[1]] for x in model_points_large])
 
-            number_of_corrections = 100
             allignment_error = np.inf #In pixel distance
-            allignment_error_threshold = 3
 
-            # If the method is upnp, delete focal length from K to check if its possible
-            # to get a good result
-            # if k == "upnp":
-            #     K[:2,:2] = 0
+            # Solve the pnp problem, and determine the image location of
+            # endpoints of the model
+            _ret, rvec, tvec = cv2.solvePnP(
+                temp_model_points, temp_image_points,
+                K, dist_coef,
+                flags=pnp_method)
 
-            correction_iteration = 0
+            # Display the result of the solution and return the points of the model on the image
+            model_on_image, result_fig = CameraCalibration.displayPlacement(image,
+                                                                temp_model_points,
+                                                                rvec, tvec,
+                                                                K, dist_coef,
+                                                                horizon_method + "_" + k +
+                                                                " - err:" + "{0:.2f}".format(allignment_error))
 
-            for _ in range(number_of_corrections):
 
-                # Solve the pnp problem, and determine the image location of
-                # endpoints of the model
+            result_fig.savefig("placement_axes_" + horizon_method + "_initial.png")
+
+            # Find the homography matrix that represents the projection matrix.
+            temp_model_points = np.float64([[x[0], x[1]] for x in model_points_large])
+            adjustment_homography, status = cv2.findHomography(temp_model_points, model_on_image)
+
+            if all(status):
+
+                # From the image plane, project back to the model plane, using the inverse projection.
+                temp_model_points = transform.matrix_transform(temp_image_points,
+                                                               np.linalg.inv(adjustment_homography))
+                temp_model_points = np.array(list(map(lambda x: [x[0], 0, h_warped_large - x[1]], temp_model_points)))
+
                 _ret, rvec, tvec = cv2.solvePnP(
                     temp_model_points, temp_image_points,
                     K, dist_coef,
                     flags=pnp_method)
 
-                # for _ in range(10):
-                #     _ret, rvec, tvec = cv2.solvePnP(
-                #         temp_model_points, temp_image_points,
-                #         K, dist_coef,
-                #         rvec, tvec,
-                #         useExtrinsicGuess = True,
-                #         flags=pnp_method)
+            model_on_image, result_fig = CameraCalibration.displayPlacement(image,
+                                                                            temp_model_points,
+                                                                            rvec, tvec,
+                                                                            K, dist_coef,
+                                                                            horizon_method + "_" + k +
+                                                                            " - err:" + "{0:.2f}".format(
+                                                                                allignment_error))
 
-                # Display the result of the solution and return the points of the model on the image
-                model_on_image, result_fig = CameraCalibration.displayPlacement(image,
-                                                                    temp_model_points,
-                                                                    rvec, tvec,
-                                                                    K, dist_coef,
-                                                                    horizon_method + "_" + k +
-                                                                    " - err:" + "{0:.2f}".format(allignment_error))
+            allignment_error = sum(np.linalg.norm(model_on_image - image_points, axis=1))
 
-                if correction_iteration == 0:
-                    result_fig.savefig("placement_axes_" + horizon_method + "_initial.png")
-
-                adjustment_homography, status = cv2.findHomography(model_on_image, temp_image_points)
+            model_on_image, result_fig = CameraCalibration.displayPlacement(image,
+                                                                            temp_model_points,
+                                                                            rvec, tvec,
+                                                                            K, dist_coef,
+                                                                            horizon_method + "_" + k +
+                                                                            " - err:" + "{0:.2f}".format(
+                                                                                allignment_error))
 
 
-                if all(status):
 
-                    # Apply the homography on horizon and zenith points to adjust them (potentially)
-                    # to appropriate focal length
 
-                    wrapped_model = np.array(list(map(lambda x: [x[0], h_warped_large - x[2]], temp_model_points)))
-                    wrapped_model = transform.matrix_transform(wrapped_model, adjustment_homography)
-                    wrapped_model = np.array(list(map(lambda x: [x[0], 0, h_warped_large - x[1]], wrapped_model)))
-
-                    model_update_coefficient = 0.1
-                    temp_model_points = temp_model_points * (1 - model_update_coefficient) +\
-                                        wrapped_model * model_update_coefficient
-
-                    allignment_error = sum(np.linalg.norm(model_on_image - image_points, axis=1))
-
-                    correction_iteration += 1
-
-                    # If the distance between points is smaller than a threshold, stop
-                    if allignment_error < allignment_error_threshold:
-
-                        # Display and save for one last time
-                        _, result_fig = CameraCalibration.displayPlacement( image,
-                                                            temp_model_points,
-                                                            rvec, tvec,
-                                                            K, dist_coef,
-                                                            horizon_method + "-" + k +
-                                                            " - err:" + str(allignment_error))
-
-                        result_fig.savefig("placement_axes_" + horizon_method + "_final.png")
-                        break
-                else:
-                    break
+            result_fig.savefig("placement_axes_" + horizon_method + "_final.png")
 
             # region warped_image_correction
 
@@ -283,7 +267,7 @@ class CameraCalibration:
 
             # Write solution information
             CameraCalibration.camWriter.write("{},{},{},{}".format(k,
-                                                                   correction_iteration,
+                                                                   0,
                                                                    allignment_error,
                                                                    utils.focalToFOV(K[0,0], h_org)
                                                                    ))

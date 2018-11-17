@@ -284,7 +284,8 @@ def processGTlines(data):
     ground_zenith = horizon_detector.HorizonDetectorLib.ransac_zenith_vp(zenith_edgelets,
                                                                          horizon_points,
                                                                          [data['image'].shape[0] / 2,
-                                                                          data['image'].shape[1] / 2])
+                                                                          data['image'].shape[1] / 2],
+                                                                         15)
 
     ground_focal = horizon_detector.HorizonDetectorLib.find_focal_length(horizon_points, ground_zenith)
 
@@ -365,7 +366,7 @@ def rectify_groundPlane(image_path,
     pedestrian_posture_paths, pedestrian_postures, pedestrian_posture_trajectory = \
         horizon_detector.HorizonDetectorLib.parse_pedestrian_detection(np.copy(image),
                                     detection_data_file,
-                                    65)
+                                    frames_per_check)
 
     # Single posture implementation requires pedestrian ID's
     pedestrian_posture_paths_single, pedestrian_postures_single, pedestrian_posture_trajectory_single = \
@@ -392,8 +393,7 @@ def rectify_groundPlane(image_path,
         'postures_hough': [
                             [np.concatenate((pedestrian_posture_paths[j], image_lines[j]), axis=0)
                               for j in range(3)],
-                            [np.concatenate((pedestrian_postures[j], image_lines[j]), axis=0)
-                             for j in range(3)],
+                            pedestrian_postures,
                             pedestrian_posture_trajectory],
     }
 
