@@ -221,17 +221,17 @@ class HorizonDetectorLib:
 
         v1_angle = np.tan(np.arccos(np.dot(right_vp - left_vp, nadir - left_vp) / (v1_zen_len * v1_v2_len)))
         v2_angle = np.tan(np.arccos(np.dot(left_vp - right_vp, nadir - right_vp) / (v2_zen_len * v1_v2_len)))
-        zenith_angle = np.tan(np.arccos(np.dot(right_vp - nadir, left_vp - nadir) / (v1_zen_len * v2_zen_len)))
+        nadir_angle = np.tan(np.arccos(np.dot(right_vp - nadir, left_vp - nadir) / (v1_zen_len * v2_zen_len)))
 
         image_center = [0, 0, 1]
 
         image_center[0] = (left_vp[0] * v1_angle +
                            right_vp[0] * v2_angle +
-                           nadir[0] * zenith_angle) / (v1_angle + v2_angle + zenith_angle)
+                           nadir[0] * nadir_angle) / (v1_angle + v2_angle + nadir_angle)
 
         image_center[1] = (left_vp[1] * v1_angle +
                            right_vp[1] * v2_angle +
-                           nadir[1] * zenith_angle) / (v1_angle + v2_angle + zenith_angle)
+                           nadir[1] * nadir_angle) / (v1_angle + v2_angle + nadir_angle)
 
         center_hor_dist = np.abs(np.dot(np.array(image_center), horizon_homogenous)) / np.linalg.norm(
             horizon_homogenous[:2])
@@ -246,7 +246,7 @@ class HorizonDetectorLib:
         return focal_length
 
     @staticmethod
-    def showInliers(path_lines, inliers, point, plot_axis):
+    def showInliers(path_lines, inliers, point, plot_axis, color):
 
         centers, directions, strengths = path_lines
 
@@ -258,13 +258,13 @@ class HorizonDetectorLib:
             plot_axis.plot([centers[i][0] - (directions[i][0] * strengths[i]),
                             centers[i][0] + (directions[i][0] * strengths[i])],
                            [centers[i][1] - (directions[i][1] * strengths[i]),
-                            centers[i][1] + (directions[i][1] * strengths[i])], 'r-')
+                            centers[i][1] + (directions[i][1] * strengths[i])], color + "-", lw=0.75)
 
 
-        for i in range(centers.shape[0]):
-            xax = [centers[i, 0], point[0]]
-            yax = [centers[i, 1], point[1]]
-            plot_axis.plot(xax, yax, 'b:')
+        # for i in range(centers.shape[0]):
+        #     xax = [centers[i, 0], point[0]]
+        #     yax = [centers[i, 1], point[1]]
+        #     plot_axis.plot(xax, yax, 'b:')
 
     # Determines the vanishing points on horizon using information coming from pedestrian paths
     # OR uses the trajectory information and/or edges from the image to detect vanishing points
@@ -277,16 +277,17 @@ class HorizonDetectorLib:
         # Using RANSAC method on trajectories
         model = HorizonDetectorLib.ransac_vanishing_point(path_lines,
                                                           HorizonDetectorLib.INLIER_THRESHOLD_HORIZON)
+        # model = HorizonDetectorLib.reestimate_model(model, path_lines, 5)
         vp1 = model / model[2]
         plot_axis.plot(vp1[0], vp1[1], 'bo')
 
         # Before determining the second VP, remove inliers as they already contributed to first VP
         path_lines_reduced, inliers = HorizonDetectorLib.remove_inliers(vp1, path_lines,
-                                                                HorizonDetectorLib.INLIER_THRESHOLD_HORIZON)
+                                                                30)
 
         # Display the inliers
-        # if draw_features:
-        #     HorizonDetectorLib.showInliers(path_lines, inliers, vp1, plot_axis)
+        if draw_features:
+            HorizonDetectorLib.showInliers(path_lines, inliers, vp1, plot_axis, 'r')
 
         path_lines = path_lines_reduced
 
@@ -294,17 +295,18 @@ class HorizonDetectorLib:
         # Find second vanishing point
         model2 = HorizonDetectorLib.ransac_vanishing_point(path_lines,
                                                            HorizonDetectorLib.INLIER_THRESHOLD_HORIZON)
+        # model2 = HorizonDetectorLib.reestimate_model(model2, path_lines, 5)
         vp2 = model2 / model2[2]
         plot_axis.plot(vp2[0], vp2[1], 'bo')
 
         # Test if we can find the nadir vanishing point
         # Before determining the second VP, remove inliers as they already contributed to first VP
         path_lines_reduced, inliers = HorizonDetectorLib.remove_inliers(vp2, path_lines,
-                                                                HorizonDetectorLib.INLIER_THRESHOLD_HORIZON)
+                                                                60)
 
         # Display the inliers
         if draw_features:
-            HorizonDetectorLib.showInliers(path_lines, inliers, vp2, plot_axis)
+            HorizonDetectorLib.showInliers(path_lines, inliers, vp2, plot_axis, 'g')
 
         path_lines = path_lines_reduced
 
@@ -317,6 +319,7 @@ class HorizonDetectorLib:
 
         model3 = HorizonDetectorLib.ransac_zenith_vp(path_lines, [vp1, vp2], image_center,
                                                      HorizonDetectorLib.INLIER_THRESHOLD_NADIR)
+        model3 = HorizonDetectorLib.reestimate_model(model3, path_lines, 5)
         vp3 = model3 / model3[2]
         plot_axis.plot(vp3[0], vp3[1], 'bo')
 
@@ -324,7 +327,7 @@ class HorizonDetectorLib:
                                                        HorizonDetectorLib.INLIER_THRESHOLD_NADIR)
 
         if draw_features:
-            HorizonDetectorLib.showInliers(path_lines, inliers, vp3, plot_axis)
+            HorizonDetectorLib.showInliers(path_lines, inliers, vp3, plot_axis, 'b')
 
         # The vanishing point with highest y value is taken as the nadir 8as we are looking at the world birdview)
         vanishers = [vp1,vp2,vp3]
@@ -388,11 +391,6 @@ class HorizonDetectorLib:
                 current_model = np.cross(l1, l2)  # Potential vanishing point
                 current_model = current_model / current_model[2]
 
-                #TODO: Delete?
-                # Its distance to center and the horizon
-                horizon_distance = np.abs(np.dot(current_model.T, horizon_homogenous))
-                centre_distance = np.linalg.norm(current_model[:2] - image_center[:2])
-
                 if np.sum(current_model ** 2) < 1 or current_model[2] == 0 or current_model[1] < 0:
                     # reject degenerate candidates, which lie on the wrong side of the horizon
                     continue
@@ -412,9 +410,6 @@ class HorizonDetectorLib:
     def generate_search_bins(edgelets):
 
         _, directions, strengths = edgelets
-
-        # Parameter
-        top_strength_percentage = 20
 
         #
         # # Number of neighbour bins to consider (symmetric)
@@ -461,11 +456,9 @@ class HorizonDetectorLib:
         #                                                                     first_index_space))
 
         sorted_strengths = np.argsort(-strengths)
-        if len(sorted_strengths) > 20:
-            sorted_strengths = sorted_strengths[:len(strengths) //(100 // top_strength_percentage)]
-
-        first_index_space  = sorted_strengths
-        second_index_space = sorted_strengths
+        num_pts = len(sorted_strengths)
+        first_index_space = sorted_strengths if num_pts < 20 else sorted_strengths[:num_pts // 5]  # Top 20 percentile
+        second_index_space = sorted_strengths if num_pts < 20 else sorted_strengths[:num_pts // 2]  # Top 50 percentile
 
         return first_index_space, second_index_space
 
@@ -589,3 +582,38 @@ class HorizonDetectorLib:
         strengths = strengths[~inliers]
         edgelets = (locations, directions, strengths)
         return edgelets, inliers
+
+    def reestimate_model(model, edgelets, threshold_reestimate=5):
+        """Reestimate vanishing point using inliers and least squares.
+
+        All the edgelets which are within a threshold are used to reestimate model
+
+        Parameters
+        ----------
+        model: ndarry of shape (3,)
+            Vanishing point model in homogenous coordinates which is to be
+            reestimated.
+        edgelets: tuple of ndarrays
+            (locations, directions, strengths) as computed by `compute_edgelets`.
+            All edgelets from which inliers will be computed.
+        threshold_inlier: float
+            threshold to be used for finding inlier edgelets.
+
+        Returns
+        -------
+        restimated_model: ndarry of shape (3,)
+            Reestimated model for vanishing point in homogenous coordinates.
+        """
+        locations, directions, strengths = edgelets
+
+        inliers = HorizonDetectorLib.compute_votes(edgelets, model, threshold_reestimate) > 0
+        locations = locations[inliers]
+        directions = directions[inliers]
+        strengths = strengths[inliers]
+
+        lines = HorizonDetectorLib.edgelet_lines((locations, directions, strengths))
+
+        a = lines[:, :2]
+        b = -lines[:, 2]
+        est_model = np.linalg.lstsq(a, b)[0]
+        return np.concatenate((est_model, [1.]))

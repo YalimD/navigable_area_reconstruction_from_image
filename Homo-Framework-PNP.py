@@ -490,7 +490,7 @@ def rectify_groundPlane(image_path,
             # endregion
 
             # Complete stratified approach that rectifies and translates the navigable area
-            warped_result, model_points, H = compute_homography_and_warp(segmented_img,
+            warped_result_segmented, model_points, H = compute_homography_and_warp(segmented_img,
                                                                          list(leftVP),
                                                                          list(rightVP),
                                                                          vp_determination_methods[k][2],
@@ -508,7 +508,7 @@ def rectify_groundPlane(image_path,
 
                 #The rectification was unsucessful, restore the image
                 print("The perspective correction was unsuccessful, returning original result")
-                warped_result = image
+                warped_result_segmented = image
                 model_points = image_points
 
             # endregion
@@ -519,18 +519,25 @@ def rectify_groundPlane(image_path,
                 plot_axis = rectified_axis[i // col, i % col]
 
             plot_axis.set_title(str(k))
-            plot_axis.imshow(warped_result)
+            plot_axis.imshow(warped_result_segmented)
 
             for i in range(len(model_points)):
                 plot_axis.plot([model_points[i][0], model_points[(i + 1) % 4][0]],
                          [model_points[i][1], model_points[(i + 1) % 4][1]], 'b')
 
-            plt.imsave("warped_result_" + k +".png", warped_result)
+            plt.imsave("warped_result_" + k +".png", warped_result_segmented)
 
+            image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+            warped_org = transform.warp(image,
+                                np.linalg.inv(H),
+                                clip = False,
+                                output_shape=(height, width))
+
+            plt.imsave("warped_result_original_" + k + ".png", warped_org)
 
             #Intrinsic matrix for camera, same for both model (rectification camera) and scene camera
-            intrinsic = np.array([[focal_length,0,warped_result.shape[1]/2],
-                         [0,focal_length,warped_result.shape[0]/2],
+            intrinsic = np.array([[focal_length,0,warped_result_segmented.shape[1]/2],
+                         [0,focal_length,warped_result_segmented.shape[0]/2],
                          [0,0,1]])
 
             #Output the internal and external parameters through a text file
@@ -540,7 +547,8 @@ def rectify_groundPlane(image_path,
 
             cameraCalibration.CameraCalibration.extractCameraParameters(k,
                                                                         image,
-                                                                        warped_result,
+                                                                        warped_org,
+                                                                        warped_result_segmented,
                                                                         model_points,
                                                                         image_points,
                                                                         intrinsic)
