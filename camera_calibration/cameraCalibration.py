@@ -1,16 +1,19 @@
-import numpy as np
+from os import path
+
 import cv2
-import utils
 import matplotlib.pyplot as plt
+import numpy as np
 import skimage.transform as transform
+
+import utils
 
 __all__ = ["CameraCalibration"]
 
 
 class CameraParameterWriter:
 
-    def __init__(self):
-        self.writer = open("unityCamCalibration.txt","w+")
+    def __init__(self, directory):
+        self.writer = open(path.join(directory, "unityCamCalibration.txt"), "w+")
 
     def write(self, input_line):
         self.writer.write(input_line)
@@ -21,10 +24,8 @@ class CameraParameterWriter:
 
 class CameraCalibration:
 
-    camWriter = CameraParameterWriter()
-
     @staticmethod
-    def displayPlacement (image, model_points, rvec, tvec, K, dist_coef, horizon_method):
+    def display_placement (image, model_points, rvec, tvec, K, dist_coef, horizon_method):
 
         col = "rgb"
         model_on_image = []
@@ -62,10 +63,14 @@ class CameraCalibration:
         return np.array(model_on_image), fig
 
     @staticmethod
-    def extractCameraParameters(horizon_method, image, warped_img, model_points, image_points, K):
+    def extract_camera_parameters(horizon_method, image, warped_img,
+                                  warped_img_segmented, model_points, image_points, K,
+                                  save_directory = ""):
+
+        camWriter = CameraParameterWriter(save_directory)
 
         h_org, w_org, _ = image.shape
-        h_warped, w_warped, _ = warped_img.shape
+        h_warped, w_warped, _ = warped_img_segmented.shape
 
         clean_img = np.copy(image)
 
@@ -73,7 +78,7 @@ class CameraCalibration:
         # The image below the vanishing line is used for mapping
         plt.figure()
         plt.title("Before correction, mesh model")
-        plt.imshow(warped_img)
+        plt.imshow(warped_img_segmented)
 
         for i in range(len(model_points)):
             plt.plot([model_points[i][0], model_points[(i + 1) % len(model_points)][0]],
@@ -89,11 +94,18 @@ class CameraCalibration:
 
         # The corrected image would grow large so we need to assign extra space for it
         model_resize = 2
-        warped_image_large = np.zeros((h_warped * model_resize, w_warped * model_resize, 3))
-        warped_image_large[int(h_warped * ((model_resize - 1) / 2)) : int(h_warped * ((model_resize + 1) / 2))
-                        , int(w_warped * ((model_resize - 1) / 2)): int(w_warped * ((model_resize + 1) / 2)), :] = warped_img
 
-        h_warped_large, w_warped_large, _ = warped_image_large.shape
+        # Resize the warped segmented image
+        warped_image_segmented_large = np.zeros((h_warped * model_resize, w_warped * model_resize, 3))
+        warped_image_segmented_large[int(h_warped * ((model_resize - 1) / 2)) : int(h_warped * ((model_resize + 1) / 2))
+                        , int(w_warped * ((model_resize - 1) / 2)): int(w_warped * ((model_resize + 1) / 2)), :] = warped_img_segmented
+
+        # Resize the warped original image
+        warped_image_org_large = np.zeros((h_warped * model_resize, w_warped * model_resize, 3))
+        warped_image_org_large[int(h_warped * ((model_resize - 1) / 2)): int(h_warped * ((model_resize + 1) / 2))
+        , int(w_warped * ((model_resize - 1) / 2)): int(w_warped * ((model_resize + 1) / 2)), :] = warped_img
+
+        h_warped_large, w_warped_large, _ = warped_image_segmented_large.shape
 
         model_points_large = np.array(list( map( lambda x: x + [w_warped * ((model_resize - 1) / 2),
                                                                 h_warped * ((model_resize - 1) / 2)], model_points)))
@@ -101,7 +113,7 @@ class CameraCalibration:
 
         plt.figure()
         plt.title("Before correction, large mesh model")
-        plt.imshow(warped_image_large)
+        plt.imshow(warped_image_segmented_large)
 
         for i in range(len(model_points_large)):
             plt.plot([model_points_large[i][0], model_points_large[(i + 1) % len(model_points_large)][0]],
@@ -138,25 +150,27 @@ class CameraCalibration:
                 flags=pnp_method)
 
             # Display the result of the solution and return the points of the model on the image
-            model_on_image, result_fig = CameraCalibration.displayPlacement(image,
-                                                                temp_model_points,
-                                                                rvec, tvec,
-                                                                K, dist_coef,
-                                                                horizon_method + "_" + k +
+            model_on_image, result_fig = CameraCalibration.display_placement(image,
+                                                                             temp_model_points,
+                                                                             rvec, tvec,
+                                                                             K, dist_coef,
+                                                                             horizon_method + "_" + k +
                                                                 " - err:" + "{0:.2f}".format(allignment_error))
 
 
-            result_fig.savefig("placement_axes_" + horizon_method + "_initial.png")
+            result_fig.savefig(path.join(save_directory, "placement_axes_" + horizon_method + "_initial.png"))
 
             # Find the homography matrix that represents the projection matrix.
+            # They are very different originaly, but if we omit Y axis, it can be ralized as a homography as it
+            # is between two planes now.
             temp_model_points = np.float64([[x[0], x[1]] for x in model_points_large])
-            adjustment_homography, status = cv2.findHomography(temp_model_points, model_on_image)
+            projection_homography, status = cv2.findHomography(temp_model_points, model_on_image)
 
             if all(status):
 
                 # From the image plane, project back to the model plane, using the inverse projection.
                 temp_model_points = transform.matrix_transform(temp_image_points,
-                                                               np.linalg.inv(adjustment_homography))
+                                                               np.linalg.inv(projection_homography))
                 temp_model_points = np.array(list(map(lambda x: [x[0], 0, h_warped_large - x[1]], temp_model_points)))
 
                 _ret, rvec, tvec = cv2.solvePnP(
@@ -164,28 +178,28 @@ class CameraCalibration:
                     K, dist_coef,
                     flags=pnp_method)
 
-            model_on_image, result_fig = CameraCalibration.displayPlacement(image,
-                                                                            temp_model_points,
-                                                                            rvec, tvec,
-                                                                            K, dist_coef,
-                                                                            horizon_method + "_" + k +
+            model_on_image, result_fig = CameraCalibration.display_placement(image,
+                                                                             temp_model_points,
+                                                                             rvec, tvec,
+                                                                             K, dist_coef,
+                                                                             horizon_method + "_" + k +
                                                                             " - err:" + "{0:.2f}".format(
                                                                                 allignment_error))
 
             allignment_error = sum(np.linalg.norm(model_on_image - image_points, axis=1))
 
-            model_on_image, result_fig = CameraCalibration.displayPlacement(image,
-                                                                            temp_model_points,
-                                                                            rvec, tvec,
-                                                                            K, dist_coef,
-                                                                            horizon_method + "_" + k +
+            model_on_image, result_fig = CameraCalibration.display_placement(image,
+                                                                             temp_model_points,
+                                                                             rvec, tvec,
+                                                                             K, dist_coef,
+                                                                             horizon_method + "_" + k +
                                                                             " - err:" + "{0:.2f}".format(
                                                                                 allignment_error))
 
 
 
 
-            result_fig.savefig("placement_axes_" + horizon_method + "_final.png")
+            result_fig.savefig(path.join(save_directory,"placement_axes_" + horizon_method + "_final.png"))
 
             # region warped_image_correction
 
@@ -194,7 +208,7 @@ class CameraCalibration:
             # Recalculate the adjustment homography as the warped results were interpolated in the mesh
             temp_model_points = np.array(list(map(lambda x: [x[0], h_warped_large - x[2]], temp_model_points)))
 
-            adjustment_homography, _ = cv2.findHomography(model_points_large, temp_model_points)
+            projection_homography, _ = cv2.findHomography(model_points_large, temp_model_points)
 
             # Find the required translation to keep navigable region inside the image
 
@@ -218,16 +232,24 @@ class CameraCalibration:
                           [0, 1, -ty],
                           [0, 0, 1]])
 
-            adjustment_homography = np.dot(translation_matrix, adjustment_homography)
+            projection_homography = np.dot(translation_matrix, projection_homography)
 
-            pnp_warped_img = transform.warp(warped_image_large, np.linalg.inv(adjustment_homography),
+            pnp_warped_img = transform.warp(warped_image_segmented_large, np.linalg.inv(projection_homography),
                                         output_shape = (h_warped_large, w_warped_large),
                                         preserve_range=False)
 
             plt.figure()
             plt.title("Updated warped image for {}".format(k))
             plt.imshow(pnp_warped_img)
-            plt.imsave("warped_result_final_{}.png".format(k), pnp_warped_img)
+            plt.imsave(path.join(save_directory,"warped_result_final_{}.png".format(k)), pnp_warped_img)
+
+            warped_org_final = transform.warp(warped_image_org_large,
+                                        np.linalg.inv(projection_homography),
+                                        clip=False,
+                                        output_shape=(h_warped_large, w_warped_large),
+                                        preserve_range=False)
+
+            plt.imsave(path.join(save_directory,"warped_result_original_" + k + "_final.png"), warped_org_final)
 
             # Re-adjust the model points according to translated and scaled warped image
             temp_model_points = transform.matrix_transform(temp_model_points, translation_matrix)
@@ -249,7 +271,7 @@ class CameraCalibration:
             tvec = np.dot(-rvec, tvec)
 
             # Intrinsic Line
-            CameraCalibration.camWriter.write("{} {} {} {} {} {}\n".format(w_org, h_org,
+            camWriter.write("{} {} {} {} {} {}\n".format(w_org, h_org,
                                                                            K[0][2], K[1][2],
                                                                            K[0][0], K[1][1]))
 
@@ -260,13 +282,13 @@ class CameraCalibration:
             tvec[0] -= tx
             tvec[2] += ty
 
-            CameraCalibration.camWriter.write("{} {} {} {} {} {} {} {} {} {} {} {} {} {}\n"
+            camWriter.write("{} {} {} {} {} {} {} {} {} {} {} {} {} {}\n"
                                               .format(*(rvec[:, 0]), *(rvec[:, 1]),*(rvec[:, 2]),
                                                       *tvec,
                                                       w_warped, h_warped))
 
             # Write solution information
-            CameraCalibration.camWriter.write("{},{},{},{}".format(k,
+            camWriter.write("{},{},{},{}".format(k,
                                                                    0,
                                                                    allignment_error,
                                                                    utils.focalToFOV(K[0,0], h_org)

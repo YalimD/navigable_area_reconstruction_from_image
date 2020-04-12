@@ -1,61 +1,122 @@
+import sys
+from os import path
+
 import cv2
 import numpy as np
-import math
-import sys
+from matplotlib import cm
 from matplotlib import pyplot as plt
-
-from sklearn import linear_model
-from skimage import transform, feature
 
 __all__ = ["HorizonDetectorLib"]
 
-class HorizonDetectorLib:
-
+class HorizonDetectorLib(object):
     # Parameter
     # Threshold to be used for computing inliers in degrees.Angle between
     # edgelet direction and vanishing point is thresholded.
     RANSAC_ITERATION_COUNT = 10000
-    HOUGH_LINE_LENGTH = 20
-    HOUGH_LINE_GAP = 10
-    INLIER_THRESHOLD_HORIZON = 20
-    INLIER_THRESHOLD_NADIR = 30
 
+    BILATERAL_D = 9
+    BILATERAL_SIGMA_C = 60
+    BILATERAL_SIGMA_S = 60
+
+    HOUGH_LINE_LENGTH = 30
+    HOUGH_LINE_GAP = 10
+
+    # These should be tuned according to the inliers for each
+    INLIER_THRESHOLD_HORIZON_FIRST = 40
+    INLIER_THRESHOLD_HORIZON_SECOND = 20
+
+    # Keep this high in order to focus on vertical lines, as they cannot contribute to horizon but
+    # other horizontal lines can influence nadir
+    INLIER_THRESHOLD_NADIR = 5
 
     # Extracts the edges and hough lines from the image
     # Taken from IMAGE RECTIFICATION
     @staticmethod
-    def extract_image_lines(img):
-        image = np.copy(img)
+    def extract_image_lines(org_img, output_folder="", displayLines=True, skimage_solution=True):
+
+        image = np.copy(org_img)
 
         # Bilateral filtering which keeps the edges sharp, but textures blurry
         # seems to decrease the noisy edges that cause too many detection results
         # Read bilateral filters: http://homepages.inf.ed.ac.uk/rbf/CVonline/LOCAL_COPIES/MANDUCHI1/Bilateral_Filtering.html
         # Everyone is affected by similar and close pixels. If neighbour is not similar, then its effect is small
         # Makes things more "comical"
-        image = cv2.bilateralFilter(image, 9, 60, 60)
+        image = cv2.bilateralFilter(image, HorizonDetectorLib.BILATERAL_D,
+                                    HorizonDetectorLib.BILATERAL_SIGMA_C,
+                                    HorizonDetectorLib.BILATERAL_SIGMA_S)
 
+        # image = ndimage.gaussian_filter(image, 4)
         # The image needs to be converted to grayscale first
         grayscale_img = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-        edges = feature.canny(grayscale_img, 3)
 
-        line_segments = transform.probabilistic_hough_line(edges,   line_length = HorizonDetectorLib.HOUGH_LINE_LENGTH,
-                                                                    line_gap = HorizonDetectorLib.HOUGH_LINE_GAP)
+        if skimage_solution:
 
-        # Edge detection (canny for now)
-        # grayscale_img = cv2.Canny(grayscale_img, threshold1=75, threshold2=200, apertureSize=3)
-        # grayscale_img = cv2.Sobel(grayscale_img,cv2.CV_8UC1,1,1)
-        # grayscale_img = cv2.Laplacian(grayscale_img,cv2.CV_8UC1)
+            from skimage.transform import (probabilistic_hough_line)
+            from skimage.feature import canny
 
-        # cv2.imshow("Detected Edges", grayscale_img)
-        # cv2.waitKey(5)
+            grayscale_img = grayscale_img / 255.0
+            grayscale_img = canny(grayscale_img, sigma=3)
 
-        # Hough lines (OpenCV version)
-        # line_segments = cv2.HoughLinesP(grayscale_img, 1, np.pi / 180, threshold=100, minLineLength=30,
-        #                                 maxLineGap=30)
+            line_segments = probabilistic_hough_line(grayscale_img,
+                                                     line_length=HorizonDetectorLib.HOUGH_LINE_LENGTH,
+                                                     line_gap=HorizonDetectorLib.HOUGH_LINE_GAP)
 
+            # Taken from skimage's own tutorial
+            if displayLines:
+                # region show_edges
+                fig, axes = plt.subplots(1, 3, figsize=(15, 5), sharex=True, sharey=True)
+                ax = axes.ravel()
+
+                ax[0].imshow(image, cmap=cm.gray)
+                ax[0].set_title('Input image')
+
+                ax[1].imshow(grayscale_img, cmap=cm.gray)
+                ax[1].set_title('Canny edges')
+
+                ax[2].imshow(grayscale_img * 0)
+                for line in line_segments:
+                    p0, p1 = line
+                    ax[2].plot((p0[0], p1[0]), (p0[1], p1[1]))
+                ax[2].set_xlim((0, image.shape[1]))
+                ax[2].set_ylim((image.shape[0], 0))
+                ax[2].set_title('Probabilistic Hough')
+
+                for a in ax:
+                    a.set_axis_off()
+
+                plt.tight_layout()
+                plt.show()
+
+                # endregion show_edges
+        else:
+
+            # Edge detection (canny for now)
+            grayscale_img = cv2.Canny(grayscale_img, threshold1=150,
+                                      threshold2=200, apertureSize=3)
+            # grayscale_img = cv2.Sobel(grayscale_img,cv2.CV_8UC1,1,1)
+            # grayscale_img = cv2.Laplacian(grayscale_img, cv2.CV_8UC1)
+
+            plt.imshow(grayscale_img, cmap='gray')
+            plt.show()
+
+            # # Hough lines (OpenCV version)
+            line_segments = cv2.HoughLinesP(grayscale_img, 1, np.pi / 180, threshold=100,
+                                            minLineLength=HorizonDetectorLib.HOUGH_LINE_LENGTH,
+                                            maxLineGap=HorizonDetectorLib.HOUGH_LINE_GAP)
+
+        with open(path.join(output_folder, "line_parameters.txt"), "w") as lineWriter:
+            lineWriter.write('''Bilateral D {}, SIGMA_C {}, SIGMA_S {}, HOUGH_LENGTH {}, 
+                             HOUGH_GAP {}, HOR THRESHOLDS {},{},{}'''.format(
+                HorizonDetectorLib.BILATERAL_D,
+                HorizonDetectorLib.BILATERAL_SIGMA_C,
+                HorizonDetectorLib.BILATERAL_SIGMA_S,
+                HorizonDetectorLib.HOUGH_LINE_LENGTH,
+                HorizonDetectorLib.HOUGH_LINE_GAP,
+                HorizonDetectorLib.INLIER_THRESHOLD_HORIZON_FIRST,
+                HorizonDetectorLib.INLIER_THRESHOLD_HORIZON_SECOND,
+                HorizonDetectorLib.INLIER_THRESHOLD_NADIR))
 
         return HorizonDetectorLib.lineProperties(line_segments, image)
-
 
     # By parsing the detection data, it extracts the paths of each pedestrian for every x frames
     # The head-feet positions depend on the selected method; using bounding boxes or pedestrian postures
@@ -91,7 +152,6 @@ class HorizonDetectorLib:
                     latest_frame = frameID
                     num_of_frames += 1
 
-
                 if (agent[1] not in latest_loc.keys() or num_of_frames - (latest_loc[agent[1]])[2] >= frames_per_check) \
                         and (tracker_id is None or (int(agent[1]) in tracker_id)):
 
@@ -116,7 +176,6 @@ class HorizonDetectorLib:
                         higher_position = (headPos[1] + feetPos[1]) / 2 < (prev_pos[0][1] + prev_pos[1][1]) / 2
 
                         if size_increased ^ higher_position:
-
                             # The paths are held as pairs
                             paths.append(feet_path)
                             trajectories.append(feet_path)
@@ -134,8 +193,6 @@ class HorizonDetectorLib:
                HorizonDetectorLib.lineProperties(postures, image), \
                HorizonDetectorLib.lineProperties(trajectories, image)
 
-
-
     # Extracts the line properties from given line segments
     # Returns centers, directions and strengths
     # Uses image for displaying
@@ -148,7 +205,7 @@ class HorizonDetectorLib:
         for line in lines:
             line = list(np.array(line).flatten())  # Compatibility
 
-            if len(line) > 4: #Homogenous coordinates are given
+            if len(line) > 4:  # Homogenous coordinates are given
                 line = line[:2] + line[3:5]
 
             x0 = int(line[0])
@@ -162,7 +219,6 @@ class HorizonDetectorLib:
                 line_directions.append((x1 - x0, y1 - y0))
                 line_strengths.append(np.linalg.norm([x1 - x0, y1 - y0]))
 
-
             # Draw the detected lines on the original image
             # cv2.line(image, (x0, y0), (x1, y1), (0, 0, 255), 1)
 
@@ -172,37 +228,10 @@ class HorizonDetectorLib:
             line_directions = np.array(line_directions) / \
                               (np.linalg.norm(line_directions, axis=1)[:, np.newaxis] + sys.float_info.epsilon)
 
-
         # cv2.imshow("Extracted Lines", image)
         # cv2.waitKey(0)
 
         return tuple(map(np.array, [line_centers, line_directions, line_strengths]))
-
-
-    # Taken from that github page
-    @staticmethod
-    def edgelet_lines(edgelets):
-        """Compute lines in homogenous system for edglets.
-
-        Parameters
-        ----------
-        edgelets: tuple of ndarrays
-            (locations, directions, strengths) as computed by `compute_edgelets`.
-
-        Returns
-        -------
-        lines: ndarray of shape (n_edgelets, 3)
-            Lines at each of edgelet locations in homogenous system.
-        """
-        locations, directions, _ = edgelets
-        normals = np.zeros_like(directions)
-        normals[:, 0] = directions[:, 1]
-        normals[:, 1] = -directions[:, 0]  # as y is negative
-        p = -np.sum(locations * normals, axis=1)
-        lines = np.concatenate((normals, p[:, np.newaxis]), axis=1)
-        return lines
-
-
 
     # Takes horizon vertices and nadir vp in homogenous coordinates
     # Finds the focal length using the orthocenter of the triangle defined
@@ -221,17 +250,17 @@ class HorizonDetectorLib:
 
         v1_angle = np.tan(np.arccos(np.dot(right_vp - left_vp, nadir - left_vp) / (v1_zen_len * v1_v2_len)))
         v2_angle = np.tan(np.arccos(np.dot(left_vp - right_vp, nadir - right_vp) / (v2_zen_len * v1_v2_len)))
-        zenith_angle = np.tan(np.arccos(np.dot(right_vp - nadir, left_vp - nadir) / (v1_zen_len * v2_zen_len)))
+        nadir_angle = np.tan(np.arccos(np.dot(right_vp - nadir, left_vp - nadir) / (v1_zen_len * v2_zen_len)))
 
         image_center = [0, 0, 1]
 
         image_center[0] = (left_vp[0] * v1_angle +
                            right_vp[0] * v2_angle +
-                           nadir[0] * zenith_angle) / (v1_angle + v2_angle + zenith_angle)
+                           nadir[0] * nadir_angle) / (v1_angle + v2_angle + nadir_angle)
 
         image_center[1] = (left_vp[1] * v1_angle +
                            right_vp[1] * v2_angle +
-                           nadir[1] * zenith_angle) / (v1_angle + v2_angle + zenith_angle)
+                           nadir[1] * nadir_angle) / (v1_angle + v2_angle + nadir_angle)
 
         center_hor_dist = np.abs(np.dot(np.array(image_center), horizon_homogenous)) / np.linalg.norm(
             horizon_homogenous[:2])
@@ -246,7 +275,7 @@ class HorizonDetectorLib:
         return focal_length
 
     @staticmethod
-    def showInliers(path_lines, inliers, point, plot_axis):
+    def show_inliers(path_lines, inliers, point, plot_axis, color):
 
         centers, directions, strengths = path_lines
 
@@ -258,53 +287,51 @@ class HorizonDetectorLib:
             plot_axis.plot([centers[i][0] - (directions[i][0] * strengths[i]),
                             centers[i][0] + (directions[i][0] * strengths[i])],
                            [centers[i][1] - (directions[i][1] * strengths[i]),
-                            centers[i][1] + (directions[i][1] * strengths[i])], 'r-')
+                            centers[i][1] + (directions[i][1] * strengths[i])], color + "-", lw=0.75)
 
-
-        for i in range(centers.shape[0]):
-            xax = [centers[i, 0], point[0]]
-            yax = [centers[i, 1], point[1]]
-            plot_axis.plot(xax, yax, 'b:')
+        # for i in range(centers.shape[0]):
+        #     xax = [centers[i, 0], point[0]]
+        #     yax = [centers[i, 1], point[1]]
+        #     plot_axis.plot(xax, yax, 'b:')
 
     # Determines the vanishing points on horizon using information coming from pedestrian paths
     # OR uses the trajectory information and/or edges from the image to detect vanishing points
     # which will determine the horizon
     # TODO: Parameters for thresholds
     @staticmethod
-    def determineVP(path_lines, image_center, plot_axis, ground_truth,
-                    postures = None, draw_features = False):
+    def determineVP(path_lines, image_center, plot_axis,
+                    postures=None, draw_features=False):
 
         # Using RANSAC method on trajectories
         model = HorizonDetectorLib.ransac_vanishing_point(path_lines,
-                                                          HorizonDetectorLib.INLIER_THRESHOLD_HORIZON)
+                                                          HorizonDetectorLib.INLIER_THRESHOLD_HORIZON_FIRST)
+        # model = HorizonDetectorLib.reestimate_model(model, path_lines, 5)
         vp1 = model / model[2]
-        plot_axis.plot(vp1[0], vp1[1], 'bo')
 
         # Before determining the second VP, remove inliers as they already contributed to first VP
         path_lines_reduced, inliers = HorizonDetectorLib.remove_inliers(vp1, path_lines,
-                                                                HorizonDetectorLib.INLIER_THRESHOLD_HORIZON)
+                                                                        HorizonDetectorLib.INLIER_THRESHOLD_HORIZON_FIRST)
 
         # Display the inliers
-        # if draw_features:
-        #     HorizonDetectorLib.showInliers(path_lines, inliers, vp1, plot_axis)
+        if draw_features:
+            HorizonDetectorLib.show_inliers(path_lines, inliers, vp1, plot_axis, 'r')
 
         path_lines = path_lines_reduced
 
-
         # Find second vanishing point
         model2 = HorizonDetectorLib.ransac_vanishing_point(path_lines,
-                                                           HorizonDetectorLib.INLIER_THRESHOLD_HORIZON)
+                                                           HorizonDetectorLib.INLIER_THRESHOLD_HORIZON_SECOND)
+        # model2 = HorizonDetectorLib.reestimate_model(model2, path_lines, 5)
         vp2 = model2 / model2[2]
-        plot_axis.plot(vp2[0], vp2[1], 'bo')
 
         # Test if we can find the nadir vanishing point
         # Before determining the second VP, remove inliers as they already contributed to first VP
         path_lines_reduced, inliers = HorizonDetectorLib.remove_inliers(vp2, path_lines,
-                                                                HorizonDetectorLib.INLIER_THRESHOLD_HORIZON)
+                                                                        HorizonDetectorLib.INLIER_THRESHOLD_HORIZON_SECOND)
 
         # Display the inliers
         if draw_features:
-            HorizonDetectorLib.showInliers(path_lines, inliers, vp2, plot_axis)
+            HorizonDetectorLib.show_inliers(path_lines, inliers, vp2, plot_axis, 'g')
 
         path_lines = path_lines_reduced
 
@@ -317,41 +344,24 @@ class HorizonDetectorLib:
 
         model3 = HorizonDetectorLib.ransac_zenith_vp(path_lines, [vp1, vp2], image_center,
                                                      HorizonDetectorLib.INLIER_THRESHOLD_NADIR)
+        # model3 = HorizonDetectorLib.reestimate_model(model3, path_lines, 5)
         vp3 = model3 / model3[2]
-        plot_axis.plot(vp3[0], vp3[1], 'bo')
 
         _, inliers = HorizonDetectorLib.remove_inliers(vp3, path_lines,
                                                        HorizonDetectorLib.INLIER_THRESHOLD_NADIR)
 
         if draw_features:
-            HorizonDetectorLib.showInliers(path_lines, inliers, vp3, plot_axis)
+            HorizonDetectorLib.show_inliers(path_lines, inliers, vp3, plot_axis, 'b')
 
         # The vanishing point with highest y value is taken as the nadir 8as we are looking at the world birdview)
-        vanishers = [vp1,vp2,vp3]
+        vanishers = [vp1, vp2, vp3]
         vanishers.sort(key=lambda v: v[1])
         horizon_points = vanishers[:2]
-        horizon_points.sort(key=lambda v:v[0])
+        horizon_points.sort(key=lambda v: v[0])
 
         vp_left, vp_right, vp_zenith = horizon_points[0], horizon_points[1], vanishers[2]
 
-        line_X = np.arange(vp_left[0], vp_right[0])[:, np.newaxis]
-        horizon_line = np.cross(vp_left,vp_right)
-        horizon_line = horizon_line / horizon_line[2]
-
-        # line_X = [[vp_left[0], vp_right[0]]]
-        line_Y = list(map(lambda point: (-horizon_line[0] * point[0] - horizon_line[2]) / horizon_line[1], line_X))
-
-        plot_axis.plot(line_X, line_Y, color='r')
-
-        gt_Y = np.array(list(map(lambda point: (-ground_truth[0] * point[0] - ground_truth[2]) / ground_truth[1], line_X)))
-        plot_axis.plot(line_X, gt_Y, color='g')
-
-        s = 0
-        for i in range(len(gt_Y)):
-            s += (abs(line_Y[i] - gt_Y[i]) ** 1)
-        r_mse = np.sqrt(s / len(gt_Y))
-
-        return [vp_left, vp_right, vp_zenith, r_mse]
+        return [vp_left, vp_right, vp_zenith]
 
     # Using posture data, finds nadir vanishing point only
     @staticmethod
@@ -388,11 +398,6 @@ class HorizonDetectorLib:
                 current_model = np.cross(l1, l2)  # Potential vanishing point
                 current_model = current_model / current_model[2]
 
-                #TODO: Delete?
-                # Its distance to center and the horizon
-                horizon_distance = np.abs(np.dot(current_model.T, horizon_homogenous))
-                centre_distance = np.linalg.norm(current_model[:2] - image_center[:2])
-
                 if np.sum(current_model ** 2) < 1 or current_model[2] == 0 or current_model[1] < 0:
                     # reject degenerate candidates, which lie on the wrong side of the horizon
                     continue
@@ -412,9 +417,6 @@ class HorizonDetectorLib:
     def generate_search_bins(edgelets):
 
         _, directions, strengths = edgelets
-
-        # Parameter
-        top_strength_percentage = 20
 
         #
         # # Number of neighbour bins to consider (symmetric)
@@ -461,11 +463,9 @@ class HorizonDetectorLib:
         #                                                                     first_index_space))
 
         sorted_strengths = np.argsort(-strengths)
-        if len(sorted_strengths) > 20:
-            sorted_strengths = sorted_strengths[:len(strengths) //(100 // top_strength_percentage)]
-
-        first_index_space  = sorted_strengths
-        second_index_space = sorted_strengths
+        num_pts = len(sorted_strengths)
+        first_index_space = sorted_strengths if num_pts < 20 else sorted_strengths[:num_pts // 5]  # Top 20 percentile
+        second_index_space = sorted_strengths if num_pts < 20 else sorted_strengths[:num_pts // 2]  # Top 50 percentile
 
         return first_index_space, second_index_space
 
@@ -589,3 +589,38 @@ class HorizonDetectorLib:
         strengths = strengths[~inliers]
         edgelets = (locations, directions, strengths)
         return edgelets, inliers
+
+    def reestimate_model(model, edgelets, threshold_reestimate=5):
+        """Reestimate vanishing point using inliers and least squares.
+
+        All the edgelets which are within a threshold are used to reestimate model
+
+        Parameters
+        ----------
+        model: ndarry of shape (3,)
+            Vanishing point model in homogenous coordinates which is to be
+            reestimated.
+        edgelets: tuple of ndarrays
+            (locations, directions, strengths) as computed by `compute_edgelets`.
+            All edgelets from which inliers will be computed.
+        threshold_inlier: float
+            threshold to be used for finding inlier edgelets.
+
+        Returns
+        -------
+        restimated_model: ndarry of shape (3,)
+            Reestimated model for vanishing point in homogenous coordinates.
+        """
+        locations, directions, strengths = edgelets
+
+        inliers = HorizonDetectorLib.compute_votes(edgelets, model, threshold_reestimate) > 0
+        locations = locations[inliers]
+        directions = directions[inliers]
+        strengths = strengths[inliers]
+
+        lines = HorizonDetectorLib.edgelet_lines((locations, directions, strengths))
+
+        a = lines[:, :2]
+        b = -lines[:, 2]
+        est_model = np.linalg.lstsq(a, b)[0]
+        return np.concatenate((est_model, [1.]))

@@ -1,31 +1,28 @@
-import cv2
-import numpy as np
-import matplotlib.pyplot as plt
-from matplotlib.pyplot import ion
-import skimage.transform as transform
-import math
 import argparse
-import utils
+import math
+from os import path
 
-from horizon_detection import horizon_detector
+import cv2
+import matplotlib.pyplot as plt
+import numpy as np
+import skimage.transform as transform
+
+import utils
 from camera_calibration import cameraCalibration
+from horizon_detection import horizon_detector
 
 '''
-Homography framework that applies perpective correction to given survailance image
+Homography framework that applies perspective correction to given surveillance image
 by converting it to bird-view perspective as close as possible.
 
 Works on a single image, camera is assumed to be not calibrated and focal_unity length is not known.
 
-TODO: Revise
 Algorithm steps
-- Using RANSAC, find the best point that represents the vanishing points, according to
-its reachabilty from other edges in the image
+- Using RANSAC, find the best point that represents the vanishing points
 - Identify the vanishing line as the combination of left and right VP (manhattan world assumption) 
-
-- Apply the homography logic we have talked before
-
+- Apply the homography logic
 - Using the vanishing points, approximate the focal_unity length, using triangle properties
-https://www.coursera.org/learn/robotics-perception/lecture/jnaLs/how-to-compute-intrinsics-from-vanishing-points
+Reference: https://www.coursera.org/learn/robotics-perception/lecture/jnaLs/how-to-compute-intrinsics-from-vanishing-points
 
 author Yalım Doğan
 
@@ -35,17 +32,16 @@ which is an implementation of Chaudhury, Krishnendu, Stephen DiVerdi, and Sergey
 '''
 
 
-#For stratified rectification, affine matrix requires 2 parameters that are related to
-#the circular points that lie on the absolute conic. In order to obtain them, lines with
-#known ratios are necessary. For this, we will process the given trajectory lines and pick
-#paths that have constant velocity according to reporjection.
+# For stratified rectification, affine matrix requires 2 parameters that are related to
+# the circular points that lie on the absolute conic. In order to obtain them, lines with
+# known ratios are necessary. For this, we will process the given trajectory lines and pick
+# paths that have constant velocity according to re-projection.
 
-#We also assume that no consecutive trajectory is parallel and we take only positive B values
-#as negative values cause mirror effect on ground planes
+# We also assume that no consecutive trajectory is parallel and we take only positive B values
+# as negative values cause mirror effect on ground planes
 
-#The logic is adopted from "Ground Plane Rectification by Tracking Moving Objects"
-def extract_circular_points(trajectory_lines, P, method):
-
+# The logic is adopted from "Ground Plane Rectification by Tracking Moving Objects"
+def extract_circular_points(trajectory_lines, P, method, output_path=""):
     from matplotlib.patches import Circle
 
     circles = []
@@ -55,50 +51,50 @@ def extract_circular_points(trajectory_lines, P, method):
 
     centers, directions, strengths = trajectory_lines
 
-    #For every 2 line, calculate centre and radius of the circle using line endpoints
+    # For every 2 line, calculate centre and radius of the circle using line endpoints
     for i in range(len(trajectory_lines[0]) // 2):
         line_1 = [[centers[i][0] - (directions[i][0] * strengths[i]),
-                        centers[i][0] + (directions[i][0] * strengths[i]),1],
-                       [centers[i][1] - (directions[i][1] * strengths[i]),
-                        centers[i][1] + (directions[i][1] * strengths[i]),1]]
-        line_2 = [[centers[i+1][0] - (directions[i+1][0] * strengths[i+1]),
-                        centers[i+1][0] + (directions[i+1][0] * strengths[i+1]),1],
-                       [centers[i+1][1] - (directions[i+1][1] * strengths[i+1]),
-                        centers[i+1][1] + (directions[i+1][1] * strengths[i+1]),1]]
+                   centers[i][0] + (directions[i][0] * strengths[i]), 1],
+                  [centers[i][1] - (directions[i][1] * strengths[i]),
+                   centers[i][1] + (directions[i][1] * strengths[i]), 1]]
+        line_2 = [[centers[i + 1][0] - (directions[i + 1][0] * strengths[i + 1]),
+                   centers[i + 1][0] + (directions[i + 1][0] * strengths[i + 1]), 1],
+                  [centers[i + 1][1] - (directions[i + 1][1] * strengths[i + 1]),
+                   centers[i + 1][1] + (directions[i + 1][1] * strengths[i + 1]), 1]]
 
-
-        #Apply projection to lines
+        # Apply projection to lines
         line_1 = np.array([np.dot(P, np.array(t).T) for t in line_1])
         line_1[0] = line_1[0] / line_1[0][2]
         line_1[1] = line_1[1] / line_1[1][2]
-
 
         line_2 = np.array([np.dot(P, np.array(t).T) for t in line_2])
         line_2[0] = line_2[0] / line_2[0][2]
         line_2[1] = line_2[1] / line_2[1][2]
 
-        #Assume length ratio of the trajectories are 1 in the world plane
+        # Assume length ratio of the trajectories are 1 in the world plane
         s = 1
 
-        delta_x1 = line_1[1][0] - line_1[0][0]; delta_y1 = line_1[1][1] - line_1[0][1]
-        delta_x2 = line_2[1][0] - line_2[0][0]; delta_y2 = line_2[1][1] - line_2[0][1]
+        delta_x1 = line_1[1][0] - line_1[0][0]
+        delta_y1 = line_1[1][1] - line_1[0][1]
+        delta_x2 = line_2[1][0] - line_2[0][0]
+        delta_y2 = line_2[1][1] - line_2[0][1]
 
-        c_alpha, c_beta = ((delta_x1 * delta_y1 - pow(s,2) * delta_x2 * delta_y2)
-                           / (pow(delta_y1,2) - pow((s * delta_y2),2)), 0)
-        radius = np.abs(s * (delta_x2 * delta_y1 - delta_x1 * delta_y2) / (pow(delta_y1 , 2) - pow((s * delta_y2) , 2)))
+        c_alpha, c_beta = ((delta_x1 * delta_y1 - pow(s, 2) * delta_x2 * delta_y2)
+                           / (pow(delta_y1, 2) - pow((s * delta_y2), 2)), 0)
+        radius = np.abs(s * (delta_x2 * delta_y1 - delta_x1 * delta_y2) / (pow(delta_y1, 2) - pow((s * delta_y2), 2)))
 
-
-        #For every circle found, find its intersection with every other circle
-        #Formula: http://mathworld.wolfram.com/Circle-CircleIntersection.html
-        for circle in circles: # The "circle" here shadows the one above
+        # For every circle found, find its intersection with every other circle
+        # Formula: http://mathworld.wolfram.com/Circle-CircleIntersection.html
+        for circle in circles:  # The "circle" here shadows the one above
             d = circle.center[0] - c_alpha
             r = circle.radius
-            intersection_x = c_alpha + (pow(d,2) - pow(r,2) + pow(radius,2)) \
+            intersection_x = c_alpha + (pow(d, 2) - pow(r, 2) + pow(radius, 2)) \
                              / (2 * d)
-            intersection_y = np.sqrt((r - radius - d) * (- d - r + radius) * (-d + r + radius) * (d + r + radius)) / (2*d)
+            intersection_y = np.sqrt((r - radius - d) * (- d - r + radius) * (-d + r + radius) * (d + r + radius)) / (
+                    2 * d)
 
-            if not math.isnan(intersection_y): # If there is intersection
-                intersections.add((intersection_x,abs(intersection_y)))
+            if not math.isnan(intersection_y):  # If there is intersection
+                intersections.add((intersection_x, abs(intersection_y)))
                 # intersections.add((intersection_x, -intersection_y)) Negative value is unused
 
                 # Draw the intersection points
@@ -106,16 +102,16 @@ def extract_circular_points(trajectory_lines, P, method):
                 ax.plot([intersection_x], [-intersection_y], 'ro')
 
         # Add the circle to the list
-        circle = Circle((c_alpha, c_beta), radius, color = 'b', fill=False)
+        circle = Circle((c_alpha, c_beta), radius, color='b', fill=False)
         circles.append(circle)
 
         ax = plt.gca()
         ax.add_patch(circle)
 
     mean_intersection = intersections
-    #Find and plot the mean of the intersection points
+    # Find and plot the mean of the intersection points
     if len(intersections) > 1:
-        mean_intersection = np.mean(list(intersections), axis = 0)
+        mean_intersection = np.mean(list(intersections), axis=0)
 
     if len(intersections) > 0:
         ax.plot(mean_intersection[0], mean_intersection[1], 'bo')
@@ -126,31 +122,32 @@ def extract_circular_points(trajectory_lines, P, method):
     plt.xlabel("alpha")
     plt.ylabel("beta")
     plt.show(block=False)
-    fig.savefig(method + "_circular.png")
+    fig.savefig(path.join(output_path, method + "_circular.png"))
 
     return intersections, mean_intersection
 
-#Modified version of Google's paper
+
+# Modified version of Google's paper
 def compute_homography_and_warp(image,
                                 vp1, vp2,
                                 trajectories,
                                 corners,
-                                method = "posture"):
-
+                                method="posture",
+                                output_dir=""):
     height, width, _ = image.shape
 
     # Find Projective Transform
     vanishing_line = np.cross(vp1, vp2)
     H = np.eye(3)
     H[2] = vanishing_line / vanishing_line[2]
-    H = H / H[2, 2] #As h32 needs to be 1 in projection
+    H = H / H[2, 2]  # As h32 needs to be 1 in projection
 
     final_homography = H
 
     # If trajectories are not provided, we cannot rely on them for affine correction
     if trajectories is not None:
         # Determine a and b for the affine component of the homography
-        intersections, mean_intersection = extract_circular_points(trajectories, H, method)
+        intersections, mean_intersection = extract_circular_points(trajectories, H, method, output_dir)
 
         # for mean_intersection in intersections:
         A = np.eye(3, 3)
@@ -171,10 +168,10 @@ def compute_homography_and_warp(image,
     # coordinates
 
     image_corners = np.array([
-                                [0, 0, width, width],
-                                [0, height, 0, height],
-                                [1, 1, 1, 1]
-                            ])
+        [0, 0, width, width],
+        [0, height, 0, height],
+        [1, 1, 1, 1]
+    ])
 
     # Apply the current transformation
     cords = np.dot(final_homography, image_corners)
@@ -198,9 +195,9 @@ def compute_homography_and_warp(image,
 
     final_homography = np.dot(T, final_homography)
 
-    S = np.array([[width / max_x , 0 ,0],
-                 [0, height / max_y, 0],
-                 [0 , 0 ,1]])
+    S = np.array([[width / max_x, 0, 0],
+                  [0, height / max_y, 0],
+                  [0, 0, 1]])
 
     final_homography = np.dot(S, final_homography)
 
@@ -211,23 +208,23 @@ def compute_homography_and_warp(image,
 
     warped_img = transform.warp(image,
                                 np.linalg.inv(final_homography),
-                                clip = False,
+                                clip=False,
                                 output_shape=(height, width))
 
     transformed_corners = transform.matrix_transform(corners, final_homography)
 
     return warped_img, transformed_corners, final_homography
 
+
 # Checks the polygon convexity by finding the determinant for each 3 corners in cc order
 def check_polygon_convexity(model_points):
-
     for corner_index in range(model_points.shape[0]):
 
         corner = model_points[corner_index]
         next_corner = model_points[(corner_index + 1) % model_points.shape[0]]
 
         det_matrix = np.array([
-            [1,1,1],
+            [1, 1, 1],
             [corner[0], corner[1], 0],
             [next_corner[0], next_corner[1], 0],
         ])
@@ -238,11 +235,10 @@ def check_polygon_convexity(model_points):
     return True
 
 
-#region ground_truth_determination
+# region ground_truth_determination
 
 
 def mouse_handler(event, x, y, flags, data):
-
     if event == cv2.EVENT_LBUTTONDOWN:
         if len(data) < 8:
             data['points'].append([x, y, 1])
@@ -250,9 +246,7 @@ def mouse_handler(event, x, y, flags, data):
             cv2.imshow(data['windowName'], data['image'])
 
 
-
-def processGTlines(data):
-
+def processGTlines(image_dir, data):
     cv2.destroyAllWindows()
 
     lineA = utils.normalizedCross(*data['points'][0:2])
@@ -297,24 +291,35 @@ def processGTlines(data):
     axis.plot((point2[0]), (point2[1]), 'ro')
     axis.plot(int(ground_zenith[0]), int(ground_zenith[1]), 'ro')
 
-    axis.plot((point1[0], point2[0]), (point1[1], point2[1]), color='g')
+    axis.plot((point1[0], point2[0]), (point1[1], point2[1]), color='c')
 
     plt.show(fig)
 
+    with open(path.join(image_dir, "gt.txt"), "w") as groundTruthWriter:
+        groundTruthWriter.write("Horizon {}, Horizon Points {}, Zenith {" \
+                                "}, Focal {}"
+                                .format(horizon, horizon_points, ground_zenith, ground_focal))
+
     return horizon, horizon_points, ground_zenith, ground_focal
+
 
 # endregion
 
 
-#Main method that is used to rectify the ground plane
+# Main method that is used to rectify the ground plane
 def rectify_groundPlane(image_path,
                         segmented_img_path,
                         detection_data_file,
                         frames_per_check,
+                        determine_ground_truth,
                         ground_truth_horizon,
                         ground_truth_zenith,
                         ground_truth_focal,
+                        provided_horizon,
+                        provided_zenith,
+                        provided_focal,
                         draw_features):
+    image_dir = path.dirname(image_path)
 
     # Manuel testing debugging part:
     image = cv2.imread(image_path)
@@ -324,16 +329,15 @@ def rectify_groundPlane(image_path,
     center = [width / 2, height / 2, 1]
 
     segmented_img = cv2.imread(segmented_img_path)
-    ground_truth_horizon_pnts = [0,0]
+    ground_truth_horizon_pnts = [0, 0]
 
-    if ground_truth_horizon is None or ground_truth_zenith is None or ground_truth_focal is None :
-
+    if determine_ground_truth:
         clicked_points = {}
         clicked_points['image'] = np.copy(image)
         clicked_points['points'] = []
 
         window_name = "Click on 8 points on the image whree every 2 consecutive point describes a line and every 2 lines" \
-                   "meets at horizon"
+                      "meets at horizon"
         clicked_points['windowName'] = window_name
 
         cv2.imshow(window_name, image)
@@ -341,23 +345,23 @@ def rectify_groundPlane(image_path,
         cv2.waitKey(0)
 
         ground_truth_horizon, ground_truth_horizon_pnts, \
-            ground_truth_zenith, ground_truth_focal = processGTlines(clicked_points)
+        ground_truth_zenith, ground_truth_focal = processGTlines(image_dir, clicked_points)
 
-    else:
-        cv2.imshow("Image of Interest", image)
-        cv2.waitKey(5)
+    use_ground_truth = all(
+        list(map(lambda x: x is not None, [ground_truth_horizon, ground_truth_zenith, ground_truth_focal])))
 
-    print("Ground-truth vanishing line {}".format(ground_truth_horizon))
-    print("Ground-truth nadir vp {}".format(ground_truth_zenith))
-    print("Ground-truth focal length {}".format(ground_truth_focal))
-    print("Ground-truth horizon corners {}".format(ground_truth_horizon_pnts))
+    if use_ground_truth:
+        print("Ground-truth vanishing line {}".format(ground_truth_horizon))
+        print("Ground-truth nadir vp {}".format(ground_truth_zenith))
+        print("Ground-truth focal length {}".format(ground_truth_focal))
+        print("Ground-truth horizon corners {}".format(ground_truth_horizon_pnts))
 
-    ground_fov = utils.focalToFOV(ground_truth_focal, height)
+        ground_fov = utils.focalToFOV(ground_truth_focal, height)
 
-    print("Ground-truth fov {}".format(ground_fov))
+        print("Ground-truth fov {}".format(ground_fov))
 
     # Extract the lines from the whole image
-    image_lines = horizon_detector.HorizonDetectorLib.extract_image_lines(image)
+    image_lines = horizon_detector.HorizonDetectorLib.extract_image_lines(image, image_dir)
 
     # Extract the pedestrian paths as lines (postures or bounding boxes)
 
@@ -365,18 +369,18 @@ def rectify_groundPlane(image_path,
     # The sample taken every few frames can become a performance concern
     pedestrian_posture_paths, pedestrian_postures, pedestrian_posture_trajectory = \
         horizon_detector.HorizonDetectorLib.parse_pedestrian_detection(np.copy(image),
-                                    detection_data_file,
-                                    frames_per_check)
+                                                                       detection_data_file,
+                                                                       frames_per_check)
 
     # Single posture implementation requires pedestrian ID's
-    pedestrian_posture_paths_single, pedestrian_postures_single, pedestrian_posture_trajectory_single = \
-        horizon_detector.HorizonDetectorLib.parse_pedestrian_detection(np.copy(image),
-                                    detection_data_file,
-                                    5,
-                                    tracker_id=[2]) # Parameter
+    # pedestrian_posture_paths_single, pedestrian_postures_single, pedestrian_posture_trajectory_single = \
+    # horizon_detector.HorizonDetectorLib.parse_pedestrian_detection(np.copy(image),
+    #                                                                detection_data_file,
+    #                                                                5,
+    #                                                                tracker_id=[2])  # Parameter
 
-    #If we assume the people doesn't change their velocities much
-    #and calculate a homography between a path with multiple detections
+    # We assume the people don't change their velocities much
+    # and calculate a homography between a path with multiple detections
 
     # - Postures as both feet and head locations and trajectories (too sensitive to noise, not preferable)
     # - Single tracker posture (better than above)
@@ -391,18 +395,17 @@ def rectify_groundPlane(image_path,
         #                  pedestrian_posture_trajectory_single],
         # 'hough': [image_lines, None, None],
         'postures_hough': [
-                            [np.concatenate((pedestrian_posture_paths[j], image_lines[j]), axis=0)
-                              for j in range(3)],
-                            pedestrian_postures,
-                            pedestrian_posture_trajectory],
+            [np.concatenate((pedestrian_posture_paths[j], image_lines[j]), axis=0)
+             for j in range(3)],
+            pedestrian_postures,
+            pedestrian_posture_trajectory],
     }
 
     row = int(np.sqrt(len(vp_determination_methods.keys())))
     col = int(np.sqrt(len(vp_determination_methods.keys())))
 
     horizon_fig, horizon_axis = plt.subplots(row, col)
-    rectified_fig, rectified_axis = plt.subplots(row,col)
-    # ion()
+    rectified_fig, rectified_axis = plt.subplots(row, col)
 
     for i, k in enumerate(vp_determination_methods):
 
@@ -421,41 +424,91 @@ def rectify_groundPlane(image_path,
         # In case no suitable lines for horizon calculation is found, skip
         if len(lines[0]) > 0:
 
-            leftVP, rightVP, zenith_vp, r_mse = horizon_detector.HorizonDetectorLib.determineVP(
-                                                             lines,
-                                                             center,
-                                                             plot_axis= plot_axis,
-                                                             ground_truth= ground_truth_horizon,
-                                                             postures = postures,
-                                                             draw_features = draw_features)
+            if any(list(map(lambda x: x is None, [provided_horizon, provided_zenith, provided_focal]))):
 
-            plot_axis.set_title(str(k) + " RMSE: " + str(r_mse))
+                leftVP, rightVP, zenith_vp = horizon_detector.HorizonDetectorLib.determineVP(
+                    lines,
+                    center,
+                    plot_axis=plot_axis,
+                    postures=postures,
+                    draw_features=draw_features)
 
-            # TODO: TESTING GROUND_TRUTH
-            # leftVP, rightVP = ground_truth_horizon_pnts
-            # zenith_vp = np.array(ground_truth_zenith)
+                # TODO: TESTING GROUND_TRUTH
+                # leftVP, rightVP = ground_truth_horizon_pnts
+                # zenith_vp = np.array(ground_truth_zenith)
 
-            #Get the horizon points
-            horizon = [leftVP, rightVP]
+                # Get the horizon points
+                horizon = [leftVP, rightVP]
 
-            # If the data was trajectory, only horizon is found. nadir needs to be found independently using the postures
-            if zenith_vp is None and postures is not None:
-                zenith_vp = horizon_detector.HorizonDetectorLib.ransac_zenith_vp(pedestrian_postures,
-                                                                                 horizon,
-                                                                                 center)
-            # Find the focal_unity length from the triangle of vanishing points
-            focal_length = horizon_detector.HorizonDetectorLib.find_focal_length(horizon, zenith_vp)
+                # If the data was trajectory, only horizon is found.
+                # Nadir needs to be found independently using the postures
+                if zenith_vp is None and postures is not None:
+                    zenith_vp = horizon_detector.HorizonDetectorLib.ransac_zenith_vp(pedestrian_postures,
+                                                                                     horizon,
+                                                                                     center)
+                # Find the focal_unity length from the triangle of vanishing points
+                focal_length = horizon_detector.HorizonDetectorLib.find_focal_length(horizon, zenith_vp)
 
-            zenith_vp = zenith_vp / zenith_vp[2]
-            fov = utils.focalToFOV(focal_length, height)
+                zenith_vp = zenith_vp / zenith_vp[2]
+            else:
+
+                leftVP = provided_horizon[:3]
+                rightVP = provided_horizon[3:]
+                horizon = [leftVP, rightVP]
+
+                zenith_vp = provided_zenith
+                focal_length = provided_focal
+
+            # region plot_horizons
 
             plot_axis.imshow(image)
-            plot_axis.plot((zenith_vp[0]), (zenith_vp[1]), 'ro')
-            plot_axis.plot((center[0]), (center[1]), 'yo')
-            plot_axis.plot((ground_truth_zenith[0]), (ground_truth_zenith[1]), 'go')
+
+            line_X = np.arange(leftVP[0], rightVP[0])[:, np.newaxis]
+            horizon_line = np.cross(leftVP, rightVP)
+            horizon_line = horizon_line / horizon_line[2]
+
+            # line_X = [[vp_left[0], vp_right[0]]]
+            line_Y = list(
+                map(lambda point: (-horizon_line[0] * point[0] - horizon_line[2]) / horizon_line[1], line_X))
+
+
+            if use_ground_truth:
+                gt_Y = np.array(list(
+                    map(lambda point: (-ground_truth_horizon[0] * point[0] - ground_truth_horizon[2])
+                                      / ground_truth_horizon[1], line_X)))
+                plot_axis.plot(line_X, gt_Y, color='c')
+
+                s = 0
+                for i in range(len(gt_Y)):
+                    s += (abs(line_Y[i] - gt_Y[i]) ** 1)
+
+            # TODO: Find a better metric for horizon calculation
+            # plot_axis.set_title(str(k) + " RMSE: " + str(r_mse))
+
+            plot_axis.plot(line_X, line_Y, color='r')
+
+            # Plot the points
+            plot_axis.plot(leftVP[0], leftVP[1], 'bo')
+            plot_axis.plot(rightVP[0], rightVP[1], 'bo')
+
+            # Plot the zenith points
+
+            # plot_axis.plot((zenith_vp[0]), (zenith_vp[1]), 'ro')
+            # plot_axis.plot((center[0]), (center[1]), 'yo')
+            #
+            # if use_ground_truth:
+            #     plot_axis.plot((ground_truth_zenith[0]), (ground_truth_zenith[1]), 'co')
+
+            # endregion
+
+            fov = utils.focalToFOV(focal_length, height)
 
             print("Method: {}, left: {}, right: {}".format(k, leftVP[:2], rightVP[:2]))
             print("nadir: {}, focal: {} with fov: {}".format(zenith_vp[:2], focal_length, fov))
+
+            with open(path.join(image_dir, "found_horizon.txt"), "w") as HorizonWriter:
+                HorizonWriter.write("Method: {}, left: {}, right: {},  nadir: {}, focal: {} with fov: {}"
+                                    .format(k, leftVP[:2], rightVP[:2], zenith_vp[:2], focal_length, fov))
 
             # Determine the region under the horizon in the image
             # as rectifying the image above horizon
@@ -481,21 +534,22 @@ def rectify_groundPlane(image_path,
 
             # The segments above the horizon shouldn't be considered navigable anyway
             # but we make sure we crop those parts
-            image = image[  image_points[3][1]:,
-                            image_points[3][0]:]
+            image = image[image_points[3][1]:,
+                    image_points[3][0]:]
 
-            segmented_img = segmented_img[  image_points[3][1]:,
-                                            image_points[3][0]:]
+            segmented_img = segmented_img[image_points[3][1]:,
+                            image_points[3][0]:]
 
             # endregion
 
             # Complete stratified approach that rectifies and translates the navigable area
-            warped_result, model_points, H = compute_homography_and_warp(segmented_img,
-                                                                         list(leftVP),
-                                                                         list(rightVP),
-                                                                         vp_determination_methods[k][2],
-                                                                         image_points,
-                                                                         method=k)
+            warped_result_segmented, model_points, H = compute_homography_and_warp(segmented_img,
+                                                                                   list(leftVP),
+                                                                                   list(rightVP),
+                                                                                   vp_determination_methods[k][2],
+                                                                                   image_points,
+                                                                                   method=k,
+                                                                                   output_dir=image_dir)
 
             # region result_validation
 
@@ -505,10 +559,9 @@ def rectify_groundPlane(image_path,
             # If any of them is not satisfied, then the original image should be returned
 
             if check_polygon_convexity(model_points) is not True:
-
-                #The rectification was unsucessful, restore the image
+                # The rectification was unsucessful, restore the image
                 print("The perspective correction was unsuccessful, returning original result")
-                warped_result = image
+                warped_result_segmented = image
                 model_points = image_points
 
             # endregion
@@ -519,55 +572,79 @@ def rectify_groundPlane(image_path,
                 plot_axis = rectified_axis[i // col, i % col]
 
             plot_axis.set_title(str(k))
-            plot_axis.imshow(warped_result)
+            plot_axis.imshow(warped_result_segmented)
 
             for i in range(len(model_points)):
                 plot_axis.plot([model_points[i][0], model_points[(i + 1) % 4][0]],
-                         [model_points[i][1], model_points[(i + 1) % 4][1]], 'b')
+                               [model_points[i][1], model_points[(i + 1) % 4][1]], 'b')
 
-            plt.imsave("warped_result_" + k +".png", warped_result)
+            plt.imsave(path.join(image_dir, "warped_result_" + k + ".png")
+                       , warped_result_segmented)
 
+            image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+            warped_org = transform.warp(image,
+                                        np.linalg.inv(H),
+                                        clip=False,
+                                        output_shape=(height, width))
 
-            #Intrinsic matrix for camera, same for both model (rectification camera) and scene camera
-            intrinsic = np.array([[focal_length,0,warped_result.shape[1]/2],
-                         [0,focal_length,warped_result.shape[0]/2],
-                         [0,0,1]])
+            plt.imsave(path.join("warped_result_original_" + k + ".png")
+                       , warped_org)
 
-            #Output the internal and external parameters through a text file
+            # Intrinsic matrix for camera, same for both model (rectification camera) and scene camera
+            intrinsic = np.array([[focal_length, 0, warped_result_segmented.shape[1] / 2],
+                                  [0, focal_length, warped_result_segmented.shape[0] / 2],
+                                  [0, 0, 1]])
+
+            # Output the internal and external parameters through a text file
             # Using the pnp methods, map the model points to image points
-            #TODO: Has concepts from:
+            # TODO: Has concepts from:
             #   Ezio Malis, Manuel Vargas, and others. Deeper understanding of the homography decomposition for vision-based control. 2007.
 
-            cameraCalibration.CameraCalibration.extractCameraParameters(k,
-                                                                        image,
-                                                                        warped_result,
-                                                                        model_points,
-                                                                        image_points,
-                                                                        intrinsic)
+            cameraCalibration.CameraCalibration.extract_camera_parameters(k,
+                                                                          image,
+                                                                          warped_org,
+                                                                          warped_result_segmented,
+                                                                          model_points,
+                                                                          image_points,
+                                                                          intrinsic,
+                                                                          image_dir)
 
     plt.show(horizon_fig)
-    horizon_fig.savefig("horizons.png")
+    horizon_fig.savefig(path.join(image_dir, "horizons.png"))
     plt.show(rectified_fig)
 
-if __name__ == "__main__":
 
+if __name__ == "__main__":
     print("Welcome to the perspective corrector")
 
     aparser = argparse.ArgumentParser(description="Using the image perspective cues and pedestrian detection data"
                                                   "in order to rectify the ground plane to be used for navigation")
-    aparser.add_argument("--image_path", help = "Image to be perspectively corrected")
-    aparser.add_argument("--segmented_img_path", help = "Segmented version of the given image")
-    aparser.add_argument("--detection_data_file", help = "Detection txt to be used")
-    aparser.add_argument("--frames_per_check", help = "How many frames needs to pass before new position is sampled",
+    aparser.add_argument("--image_path", help="Image to be corrected")
+    aparser.add_argument("--segmented_img_path", help="Segmented version of the given image")
+    aparser.add_argument("--detection_data_file", help="Detection txt to be used")
+    aparser.add_argument("--frames_per_check", help="How many frames needs to pass before new position is sampled",
                          type=int, default=60)
-    aparser.add_argument("--ground_truth_horizon", nargs='+', help = "Homogenous coordinates of the ground truth, all 3 coordinates",
-                         type=float, default = None)
-    aparser.add_argument("--ground_truth_zenith", nargs='+', help = "nadir VP coordinates of the ground truth",
-                         type=float, default = None)
-    aparser.add_argument("--ground_truth_focal", help = "Focal length of the ground truth",
-                         type=float, default = None)
-    aparser.add_argument("--draw_features", nargs='+', help = "Draw the postures, image lines and such features on the image when determining the horizon",
-                         type=bool, default=False)
+    aparser.add_argument("--determine_ground_truth", nargs='?',
+                         help="If true, program will find gt first with the aid of the user,"
+                              "Ignored when it is provided",
+                         const=True, default=False)
+    aparser.add_argument("--ground_truth_horizon", nargs='*',
+                         help="Homogenous coordinates of the ground truth, all 3 coordinates",
+                         type=float, default=None)
+    aparser.add_argument("--ground_truth_zenith", nargs='*', help="nadir VP coordinates of the ground truth",
+                         type=float, default=None)
+    aparser.add_argument("--ground_truth_focal", help="Focal length of the ground truth",
+                         type=float, default=None)
+    aparser.add_argument("--provided_horizon", nargs='*',
+                         help="Homogenous coordinates for each vanishing point from left to right",
+                         type=float, default=None)
+    aparser.add_argument("--provided_zenith", nargs='*', help="nadir VP coordinates of the to be used",
+                         type=float, default=None)
+    aparser.add_argument("--provided_focal", help="Focal length to be used for reconstruction",
+                         type=float, default=None)
+    aparser.add_argument("--draw_features", nargs='?',
+                         help="Draw the postures, image lines etc. on the image when determining the horizon",
+                         const=True, default=False)
 
     args = vars(aparser.parse_args())
 
