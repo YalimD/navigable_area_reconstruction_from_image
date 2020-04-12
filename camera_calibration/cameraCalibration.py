@@ -117,9 +117,8 @@ class CameraCalibration:
 
         plt.show()
 
-        # From experiments, p3p seems like the best
         algorithms = {
-            "iterative": cv2.SOLVEPNP_ITERATIVE,  # Working
+            "iterative": cv2.SOLVEPNP_ITERATIVE,
         }
 
         for v, k in enumerate(algorithms):
@@ -281,7 +280,7 @@ class CameraCalibration:
             camWriter.write("{},{},{},{}".format(k,
                                                  0,
                                                  allignment_error,
-                                                 utils.focalToFOV(K[0, 0], h_org)
+                                                 utils.focal_to_fov(K[0, 0], h_org)
                                                  ))
 
             print(k)

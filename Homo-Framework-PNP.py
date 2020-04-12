@@ -252,19 +252,19 @@ def mouse_handler(event, x, y, flags, data):
 def processGTlines(image_dir, data):
     cv2.destroyAllWindows()
 
-    lineA = utils.normalizedCross(*data['points'][0:2])
-    lineB = utils.normalizedCross(*data['points'][2:4])
-    point1 = list(map(lambda x: int(x), utils.normalizedCross(lineA, lineB)))
+    lineA = utils.normalized_cross(*data['points'][0:2])
+    lineB = utils.normalized_cross(*data['points'][2:4])
+    point1 = list(map(lambda x: int(x), utils.normalized_cross(lineA, lineB)))
 
-    lineA = utils.normalizedCross(*data['points'][4:6])
-    lineB = utils.normalizedCross(*data['points'][6:8])
-    point2 = list(map(lambda x: int(x), utils.normalizedCross(lineA, lineB)))
+    lineA = utils.normalized_cross(*data['points'][4:6])
+    lineB = utils.normalized_cross(*data['points'][6:8])
+    point2 = list(map(lambda x: int(x), utils.normalized_cross(lineA, lineB)))
 
     # Determine left and right
     horizon_points = [point1, point2]
     horizon_points.sort(key=lambda v: v[0])
 
-    horizon = utils.normalizedCross(point1, point2)
+    horizon = utils.normalized_cross(point1, point2)
 
     # As every line pair represents the two heads, every even/odd point creates a pair to be used
     # for a nadir vanishing point
@@ -354,7 +354,7 @@ def rectify_groundPlane(image_path,
         print("Ground-truth focal length {}".format(ground_truth_focal))
         print("Ground-truth horizon corners {}".format(ground_truth_horizon_pnts))
 
-        ground_fov = utils.focalToFOV(ground_truth_focal, height)
+        ground_fov = utils.focal_to_fov(ground_truth_focal, height)
 
         print("Ground-truth fov {}".format(ground_fov))
 
@@ -371,11 +371,11 @@ def rectify_groundPlane(image_path,
                                                                        frames_per_check)
 
     # Single posture implementation requires pedestrian ID's
-    # pedestrian_posture_paths_single, pedestrian_postures_single, pedestrian_posture_trajectory_single = \
-    # horizon_detector.HorizonDetectorLib.parse_pedestrian_detection(np.copy(image),
-    #                                                                detection_data_file,
-    #                                                                5,
-    #                                                                tracker_id=[2])  # Parameter
+    pedestrian_posture_paths_single, pedestrian_postures_single, pedestrian_posture_trajectory_single = \
+    horizon_detector.HorizonDetectorLib.parse_pedestrian_detection(np.copy(image),
+                                                                   detection_data_file,
+                                                                   5,
+                                                                   tracker_id=[2])  # Parameter
 
     # We assume the people don't change their velocities much
     # and calculate a homography between a path with multiple detections
@@ -391,12 +391,12 @@ def rectify_groundPlane(image_path,
         # 'posture_lines': [pedestrian_posture_paths, pedestrian_postures, pedestrian_posture_trajectory],
         # 'single_lines': [pedestrian_posture_paths_single, pedestrian_postures_single,
         #                  pedestrian_posture_trajectory_single],
-        # 'hough': [image_lines, None, None],
-        'postures_hough': [
-            [np.concatenate((pedestrian_posture_paths[j], image_lines[j]), axis=0)
-             for j in range(3)],
-            pedestrian_postures,
-            pedestrian_posture_trajectory],
+        'hough': [image_lines, None, None],
+        # 'postures_hough': [
+        #     [np.concatenate((pedestrian_posture_paths[j], image_lines[j]), axis=0)
+        #      for j in range(3)],
+        #     pedestrian_postures,
+        #     pedestrian_posture_trajectory]
     }
 
     row = int(np.sqrt(len(vp_determination_methods.keys())))
@@ -426,7 +426,6 @@ def rectify_groundPlane(image_path,
 
                 leftVP, rightVP, zenith_vp = horizon_detector.HorizonDetectorLib.determineVP(
                     lines,
-                    center,
                     plot_axis=plot_axis,
                     postures=postures,
                     draw_features=draw_features)
@@ -497,7 +496,7 @@ def rectify_groundPlane(image_path,
 
             # endregion
 
-            fov = utils.focalToFOV(focal_length, height)
+            fov = utils.focal_to_fov(focal_length, height)
 
             print("Method: {}, left: {}, right: {}".format(k, leftVP[:2], rightVP[:2]))
             print("nadir: {}, focal: {} with fov: {}".format(zenith_vp[:2], focal_length, fov))

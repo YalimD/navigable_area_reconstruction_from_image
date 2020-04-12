@@ -284,7 +284,7 @@ class HorizonDetectorLib:
     # OR uses the trajectory information and/or edges from the image to detect vanishing points
     # which will determine the horizon
     @staticmethod
-    def determineVP(path_lines, image_center, plot_axis,
+    def determineVP(path_lines, plot_axis,
                     postures=None, draw_features=False):
 
         # Using RANSAC method on trajectories
