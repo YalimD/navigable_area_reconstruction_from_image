@@ -1,1 +1,1 @@
-from . import horizon_detector
+from . import horizon_detector, image_rectification

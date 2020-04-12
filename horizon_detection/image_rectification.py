@@ -1,4 +1,4 @@
-# This code is entirely taken from:
+# This code is taken from (with some modifications):
 # https://github.com/chsasank/Image-Rectification
 
 """Automated Rectification of Image.
@@ -157,8 +157,8 @@ def ransac_vanishing_point(edgelets, num_ransac_iter=2000, threshold_inlier=5):
     num_pts = strengths.size
 
     arg_sort = np.argsort(-strengths)
-    first_index_space = arg_sort[:num_pts // 5]
-    second_index_space = arg_sort[:num_pts // 2]
+    first_index_space = arg_sort if num_pts < 20 else arg_sort[:num_pts // 5]
+    second_index_space = arg_sort if num_pts < 20 else arg_sort[:num_pts // 2]
 
     best_model = None
     best_votes = np.zeros(num_pts)
@@ -166,6 +166,10 @@ def ransac_vanishing_point(edgelets, num_ransac_iter=2000, threshold_inlier=5):
     for ransac_iter in range(num_ransac_iter):
         ind1 = np.random.choice(first_index_space)
         ind2 = np.random.choice(second_index_space)
+
+        # Protection against low line count
+        while ind2 == ind1 and len(first_index_space) != 1:
+            ind2 = np.random.choice(second_index_space)
 
         l1 = lines[ind1]
         l2 = lines[ind2]
@@ -320,13 +324,13 @@ def remove_inliers(model, edgelets, threshold_inlier=10):
     edgelets_new: tuple of ndarrays
         All Edgelets except those which are inliers to model.
     """
-    inliers = compute_votes(edgelets, model, 10) > 0
+    inliers = compute_votes(edgelets, model, threshold_inlier) > 0
     locations, directions, strengths = edgelets
     locations = locations[~inliers]
     directions = directions[~inliers]
     strengths = strengths[~inliers]
     edgelets = (locations, directions, strengths)
-    return edgelets
+    return edgelets, inliers
 
 
 def compute_homography_and_warp(image, vp1, vp2, clip=True, clip_factor=3):

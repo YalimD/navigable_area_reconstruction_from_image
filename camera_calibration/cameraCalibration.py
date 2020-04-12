@@ -25,7 +25,7 @@ class CameraParameterWriter:
 class CameraCalibration:
 
     @staticmethod
-    def display_placement (image, model_points, rvec, tvec, K, dist_coef, horizon_method):
+    def display_placement(image, model_points, rvec, tvec, K, dist_coef, horizon_method):
 
         col = "rgb"
         model_on_image = []
@@ -53,8 +53,8 @@ class CameraCalibration:
 
             for i in range(len(normal) - 1):
                 ax.plot([normal[0][0], normal[i + 1][0]],
-                         [normal[0][1], normal[i + 1][1]],
-                         col[i])
+                        [normal[0][1], normal[i + 1][1]],
+                        col[i])
 
             model_on_image.append(normal[0])
 
@@ -65,7 +65,7 @@ class CameraCalibration:
     @staticmethod
     def extract_camera_parameters(horizon_method, image, warped_img,
                                   warped_img_segmented, model_points, image_points, K,
-                                  save_directory = ""):
+                                  save_directory=""):
 
         camWriter = CameraParameterWriter(save_directory)
 
@@ -89,16 +89,13 @@ class CameraCalibration:
         # Initially, the model is left in openCV coordinate system, as homography correction
         # process is only valid in identical coordinate systems.
 
-        # temp_image_points = np.float64([[x[0], h_org - x[1]] for x in image_points])
-        temp_image_points = np.float64([[x] for x in image_points])
-
         # The corrected image would grow large so we need to assign extra space for it
         model_resize = 2
 
         # Resize the warped segmented image
         warped_image_segmented_large = np.zeros((h_warped * model_resize, w_warped * model_resize, 3))
-        warped_image_segmented_large[int(h_warped * ((model_resize - 1) / 2)) : int(h_warped * ((model_resize + 1) / 2))
-                        , int(w_warped * ((model_resize - 1) / 2)): int(w_warped * ((model_resize + 1) / 2)), :] = warped_img_segmented
+        warped_image_segmented_large[int(h_warped * ((model_resize - 1) / 2)): int(h_warped * ((model_resize + 1) / 2))
+        , int(w_warped * ((model_resize - 1) / 2)): int(w_warped * ((model_resize + 1) / 2)), :] = warped_img_segmented
 
         # Resize the warped original image
         warped_image_org_large = np.zeros((h_warped * model_resize, w_warped * model_resize, 3))
@@ -107,9 +104,8 @@ class CameraCalibration:
 
         h_warped_large, w_warped_large, _ = warped_image_segmented_large.shape
 
-        model_points_large = np.array(list( map( lambda x: x + [w_warped * ((model_resize - 1) / 2),
-                                                                h_warped * ((model_resize - 1) / 2)], model_points)))
-
+        model_points_large = np.array(list(map(lambda x: x + [w_warped * ((model_resize - 1) / 2),
+                                                              h_warped * ((model_resize - 1) / 2)], model_points)))
 
         plt.figure()
         plt.title("Before correction, large mesh model")
@@ -123,7 +119,7 @@ class CameraCalibration:
 
         # From experiments, p3p seems like the best
         algorithms = {
-            "iterative": cv2.SOLVEPNP_ITERATIVE, #Working
+            "iterative": cv2.SOLVEPNP_ITERATIVE,  # Working
         }
 
         for v, k in enumerate(algorithms):
@@ -132,15 +128,13 @@ class CameraCalibration:
             print("Solving with {}\n".format(k))
             image = np.copy(clean_img)
 
-            rvec = np.zeros((3, 1))
-            tvec = np.zeros((3, 1))
             dist_coef = np.zeros(4)
 
             # Adjust the solution to match the endpoints of the image to the endpoints of the model
             temp_image_points = np.float64([[x] for x in image_points])
             temp_model_points = np.float64([[x[0], 0, h_warped_large - x[1]] for x in model_points_large])
 
-            allignment_error = np.inf #In pixel distance
+            allignment_error = np.inf  # In pixel distance
 
             # Solve the pnp problem, and determine the image location of
             # endpoints of the model
@@ -155,8 +149,8 @@ class CameraCalibration:
                                                                              rvec, tvec,
                                                                              K, dist_coef,
                                                                              horizon_method + "_" + k +
-                                                                " - err:" + "{0:.2f}".format(allignment_error))
-
+                                                                             " - err:" + "{0:.2f}".format(
+                                                                                 allignment_error))
 
             result_fig.savefig(path.join(save_directory, "placement_axes_" + horizon_method + "_initial.png"))
 
@@ -167,7 +161,6 @@ class CameraCalibration:
             projection_homography, status = cv2.findHomography(temp_model_points, model_on_image)
 
             if all(status):
-
                 # From the image plane, project back to the model plane, using the inverse projection.
                 temp_model_points = transform.matrix_transform(temp_image_points,
                                                                np.linalg.inv(projection_homography))
@@ -183,8 +176,8 @@ class CameraCalibration:
                                                                              rvec, tvec,
                                                                              K, dist_coef,
                                                                              horizon_method + "_" + k +
-                                                                            " - err:" + "{0:.2f}".format(
-                                                                                allignment_error))
+                                                                             " - err:" + "{0:.2f}".format(
+                                                                                 allignment_error))
 
             allignment_error = sum(np.linalg.norm(model_on_image - image_points, axis=1))
 
@@ -193,13 +186,10 @@ class CameraCalibration:
                                                                              rvec, tvec,
                                                                              K, dist_coef,
                                                                              horizon_method + "_" + k +
-                                                                            " - err:" + "{0:.2f}".format(
-                                                                                allignment_error))
+                                                                             " - err:" + "{0:.2f}".format(
+                                                                                 allignment_error))
 
-
-
-
-            result_fig.savefig(path.join(save_directory,"placement_axes_" + horizon_method + "_final.png"))
+            result_fig.savefig(path.join(save_directory, "placement_axes_" + horizon_method + "_final.png"))
 
             # region warped_image_correction
 
@@ -212,11 +202,11 @@ class CameraCalibration:
 
             # Find the required translation to keep navigable region inside the image
 
-            tx_min = min(0, temp_model_points[:,0].min())
-            ty_min = min(0, temp_model_points[:,1].min())
+            tx_min = min(0, temp_model_points[:, 0].min())
+            ty_min = min(0, temp_model_points[:, 1].min())
 
-            tx_max = max(w_warped_large, temp_model_points[:,0].max()) - w_warped_large
-            ty_max = max(h_warped_large, temp_model_points[:,1].max()) - h_warped_large
+            tx_max = max(w_warped_large, temp_model_points[:, 0].max()) - w_warped_large
+            ty_max = max(h_warped_large, temp_model_points[:, 1].max()) - h_warped_large
 
             if tx_min == 0:
                 tx = tx_max
@@ -229,27 +219,27 @@ class CameraCalibration:
                 ty = ty_min
 
             translation_matrix = np.array([[1, 0, -tx],
-                          [0, 1, -ty],
-                          [0, 0, 1]])
+                                           [0, 1, -ty],
+                                           [0, 0, 1]])
 
             projection_homography = np.dot(translation_matrix, projection_homography)
 
             pnp_warped_img = transform.warp(warped_image_segmented_large, np.linalg.inv(projection_homography),
-                                        output_shape = (h_warped_large, w_warped_large),
-                                        preserve_range=False)
+                                            output_shape=(h_warped_large, w_warped_large),
+                                            preserve_range=False)
 
             plt.figure()
             plt.title("Updated warped image for {}".format(k))
             plt.imshow(pnp_warped_img)
-            plt.imsave(path.join(save_directory,"warped_result_final_{}.png".format(k)), pnp_warped_img)
+            plt.imsave(path.join(save_directory, "warped_result_final_{}.png".format(k)), pnp_warped_img)
 
             warped_org_final = transform.warp(warped_image_org_large,
-                                        np.linalg.inv(projection_homography),
-                                        clip=False,
-                                        output_shape=(h_warped_large, w_warped_large),
-                                        preserve_range=False)
+                                              np.linalg.inv(projection_homography),
+                                              clip=False,
+                                              output_shape=(h_warped_large, w_warped_large),
+                                              preserve_range=False)
 
-            plt.imsave(path.join(save_directory,"warped_result_original_" + k + "_final.png"), warped_org_final)
+            plt.imsave(path.join(save_directory, "warped_result_original_" + k + "_final.png"), warped_org_final)
 
             # Re-adjust the model points according to translated and scaled warped image
             temp_model_points = transform.matrix_transform(temp_model_points, translation_matrix)
@@ -262,7 +252,7 @@ class CameraCalibration:
 
             # endregion
 
-            #region camera_parameters
+            # region camera_parameters
 
             # As the pnp gives us the object translation, we need to get the camera translation by transposing and
             # applying the inverse rotation to translation
@@ -272,8 +262,8 @@ class CameraCalibration:
 
             # Intrinsic Line
             camWriter.write("{} {} {} {} {} {}\n".format(w_org, h_org,
-                                                                           K[0][2], K[1][2],
-                                                                           K[0][0], K[1][1]))
+                                                         K[0][2], K[1][2],
+                                                         K[0][0], K[1][1]))
 
             # Extrinsic Line
             tvec = [t[0] for t in tvec]
@@ -283,16 +273,16 @@ class CameraCalibration:
             tvec[2] += ty
 
             camWriter.write("{} {} {} {} {} {} {} {} {} {} {} {} {} {}\n"
-                                              .format(*(rvec[:, 0]), *(rvec[:, 1]),*(rvec[:, 2]),
-                                                      *tvec,
-                                                      w_warped, h_warped))
+                            .format(*(rvec[:, 0]), *(rvec[:, 1]), *(rvec[:, 2]),
+                                    *tvec,
+                                    w_warped, h_warped))
 
             # Write solution information
             camWriter.write("{},{},{},{}".format(k,
-                                                                   0,
-                                                                   allignment_error,
-                                                                   utils.focalToFOV(K[0,0], h_org)
-                                                                   ))
+                                                 0,
+                                                 allignment_error,
+                                                 utils.focalToFOV(K[0, 0], h_org)
+                                                 ))
 
             print(k)
             print("Rotation Rodrigues {}".format(rvec))
@@ -307,4 +297,4 @@ class CameraCalibration:
             print("Rotation Euler Angles {}".format(rvec))
             print("Translation {}".format(tvec))
 
-            #endregion
+            # endregion

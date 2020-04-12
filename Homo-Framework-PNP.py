@@ -1,5 +1,6 @@
 import argparse
 import math
+import warnings
 from os import path
 
 import cv2
@@ -90,12 +91,14 @@ def extract_circular_points(trajectory_lines, P, method, output_path=""):
             r = circle.radius
             intersection_x = c_alpha + (pow(d, 2) - pow(r, 2) + pow(radius, 2)) \
                              / (2 * d)
-            intersection_y = np.sqrt((r - radius - d) * (- d - r + radius) * (-d + r + radius) * (d + r + radius)) / (
-                    2 * d)
+
+            with warnings.catch_warnings():
+                warnings.filterwarnings('ignore')
+                intersection_y = np.sqrt((r - radius - d) * (- d - r + radius) * (-d + r + radius) * (d + r + radius)) \
+                                 / (2 * d)
 
             if not math.isnan(intersection_y):  # If there is intersection
                 intersections.add((intersection_x, abs(intersection_y)))
-                # intersections.add((intersection_x, -intersection_y)) Negative value is unused
 
                 # Draw the intersection points
                 ax.plot([intersection_x], [intersection_y], 'ro')
@@ -266,7 +269,7 @@ def processGTlines(image_dir, data):
     # As every line pair represents the two heads, every even/odd point creates a pair to be used
     # for a nadir vanishing point
 
-    zenith_lines = []
+    zenith_lines = list()
 
     zenith_lines.append([data['points'][0], data['points'][2]])
     zenith_lines.append([data['points'][1], data['points'][3]])
@@ -274,12 +277,8 @@ def processGTlines(image_dir, data):
     zenith_lines.append([data['points'][5], data['points'][7]])
 
     # Give those pairs to horizon library to obtain a nadir vanishing point
-    zenith_edgelets = horizon_detector.HorizonDetectorLib.lineProperties(zenith_lines, data['image'])
-    ground_zenith = horizon_detector.HorizonDetectorLib.ransac_zenith_vp(zenith_edgelets,
-                                                                         horizon_points,
-                                                                         [data['image'].shape[0] / 2,
-                                                                          data['image'].shape[1] / 2],
-                                                                         15)
+    zenith_edgelets = horizon_detector.HorizonDetectorLib.line_properties(zenith_lines)
+    ground_zenith = horizon_detector.HorizonDetectorLib.ransac_nadir_vp(zenith_edgelets, 15)
 
     ground_focal = horizon_detector.HorizonDetectorLib.find_focal_length(horizon_points, ground_zenith)
 
@@ -296,8 +295,7 @@ def processGTlines(image_dir, data):
     plt.show(fig)
 
     with open(path.join(image_dir, "gt.txt"), "w") as groundTruthWriter:
-        groundTruthWriter.write("Horizon {}, Horizon Points {}, Zenith {" \
-                                "}, Focal {}"
+        groundTruthWriter.write("Horizon {}, Horizon Points {}, Zenith {}, Focal {}"
                                 .format(horizon, horizon_points, ground_zenith, ground_focal))
 
     return horizon, horizon_points, ground_zenith, ground_focal
@@ -332,7 +330,7 @@ def rectify_groundPlane(image_path,
     ground_truth_horizon_pnts = [0, 0]
 
     if determine_ground_truth:
-        clicked_points = {}
+        clicked_points = dict()
         clicked_points['image'] = np.copy(image)
         clicked_points['points'] = []
 
@@ -383,7 +381,7 @@ def rectify_groundPlane(image_path,
     # and calculate a homography between a path with multiple detections
 
     # - Postures as both feet and head locations and trajectories (too sensitive to noise, not preferable)
-    # - Single tracker posture (better than above)
+    # - Single tracker posture
     # - Feet Trajectory only, RANSAC based
     # - Feet Trajectory + Hough Lines from the navigable area, RANSAC based
     # - Hough Lines from navigable area only
@@ -443,9 +441,9 @@ def rectify_groundPlane(image_path,
                 # If the data was trajectory, only horizon is found.
                 # Nadir needs to be found independently using the postures
                 if zenith_vp is None and postures is not None:
-                    zenith_vp = horizon_detector.HorizonDetectorLib.ransac_zenith_vp(pedestrian_postures,
-                                                                                     horizon,
-                                                                                     center)
+                    zenith_vp = horizon_detector.HorizonDetectorLib.ransac_nadir_vp(pedestrian_postures,
+                                                                                    horizon,
+                                                                                    center)
                 # Find the focal_unity length from the triangle of vanishing points
                 focal_length = horizon_detector.HorizonDetectorLib.find_focal_length(horizon, zenith_vp)
 
@@ -471,7 +469,6 @@ def rectify_groundPlane(image_path,
             line_Y = list(
                 map(lambda point: (-horizon_line[0] * point[0] - horizon_line[2]) / horizon_line[1], line_X))
 
-
             if use_ground_truth:
                 gt_Y = np.array(list(
                     map(lambda point: (-ground_truth_horizon[0] * point[0] - ground_truth_horizon[2])
@@ -483,7 +480,6 @@ def rectify_groundPlane(image_path,
                     s += (abs(line_Y[i] - gt_Y[i]) ** 1)
 
             # TODO: Find a better metric for horizon calculation
-            # plot_axis.set_title(str(k) + " RMSE: " + str(r_mse))
 
             plot_axis.plot(line_X, line_Y, color='r')
 
@@ -597,7 +593,7 @@ def rectify_groundPlane(image_path,
 
             # Output the internal and external parameters through a text file
             # Using the pnp methods, map the model points to image points
-            # TODO: Has concepts from:
+            # Has concepts from:
             #   Ezio Malis, Manuel Vargas, and others. Deeper understanding of the homography decomposition for vision-based control. 2007.
 
             cameraCalibration.CameraCalibration.extract_camera_parameters(k,
