@@ -15,22 +15,26 @@ class HorizonDetectorLib:
     # Parameter
     # Threshold to be used for computing inliers in degrees.Angle between
     # edgelet direction and vanishing point is thresholded.
-    RANSAC_ITERATION_COUNT = 200
+    RANSAC_ITERATION_COUNT = 10000
 
     BILATERAL_D = 9
     BILATERAL_SIGMA_C = 60
     BILATERAL_SIGMA_S = 60
 
-    HOUGH_LINE_LENGTH = 20
+    # A good set of lines (both length and quantity) are necessary to accurately define the scene
+    HOUGH_LINE_LENGTH = 50
     HOUGH_LINE_GAP = 5
 
     # These should be tuned according to the inliers for each
-    INLIER_THRESHOLD_HORIZON_FIRST = 40
-    INLIER_THRESHOLD_HORIZON_SECOND = 20
+    INLIER_THRESHOLD_HORIZON_FIRST = 10
+    INLIER_THRESHOLD_HORIZON_SECOND = 10
 
     # Keep this high in order to focus on vertical lines, as they cannot contribute to horizon but
     # other horizontal lines can influence nadir
-    INLIER_THRESHOLD_NADIR = 5
+    INLIER_THRESHOLD_NADIR = 10
+
+    # For stability, we remove the closest set from the found inliers
+    INLIER_FINAL_THRESHOLD = 5
 
     # Extracts the edges and hough lines from the image
     # Taken from IMAGE RECTIFICATION
@@ -188,7 +192,8 @@ class HorizonDetectorLib:
 
         return HorizonDetectorLib.line_properties(paths), \
                HorizonDetectorLib.line_properties(postures), \
-               HorizonDetectorLib.line_properties(trajectories)
+               HorizonDetectorLib.line_properties(trajectories), \
+               trajectories
 
     # Extracts the line properties from given line segments
     # Returns centers, directions and strengths
@@ -280,22 +285,31 @@ class HorizonDetectorLib:
                            [centers[i][1] - (directions[i][1] * strengths[i]),
                             centers[i][1] + (directions[i][1] * strengths[i])], color + "-", lw=0.75)
 
+        # Show dashed lines towards vanishing point
+        for i in range(centers.shape[0]):
+            xax = [centers[i, 0], point[0]]
+            yax = [centers[i, 1], point[1]]
+            plot_axis.plot(xax, yax, 'b:')
+
     # Determines the vanishing points on horizon using information coming from pedestrian paths
     # OR uses the trajectory information and/or edges from the image to detect vanishing points
     # which will determine the horizon
     @staticmethod
     def determineVP(path_lines, plot_axis,
-                    postures=None, draw_features=False):
+                    postures=None, constraints = None, draw_features=False):
+
+        #Used constraint vp's that are below trajectories
 
         # Using RANSAC method on trajectories
         model = image_rectification.ransac_vanishing_point(path_lines,
+                                                           constraints,
                                                            HorizonDetectorLib.RANSAC_ITERATION_COUNT,
                                                            HorizonDetectorLib.INLIER_THRESHOLD_HORIZON_FIRST)
         vp1 = model / model[2]
 
         # Before determining the second VP, remove inliers as they already contributed to first VP
         path_lines_reduced, inliers = image_rectification.remove_inliers(vp1, path_lines,
-                                                                         HorizonDetectorLib.INLIER_THRESHOLD_HORIZON_FIRST)
+                                                                         HorizonDetectorLib.INLIER_FINAL_THRESHOLD)
 
         # Display the inliers
         if draw_features:
@@ -305,6 +319,7 @@ class HorizonDetectorLib:
 
         # Find second vanishing point
         model2 = image_rectification.ransac_vanishing_point(path_lines,
+                                                            constraints,
                                                             HorizonDetectorLib.RANSAC_ITERATION_COUNT,
                                                             HorizonDetectorLib.INLIER_THRESHOLD_HORIZON_SECOND)
         vp2 = model2 / model2[2]
@@ -312,7 +327,7 @@ class HorizonDetectorLib:
         # Test if we can find the nadir vanishing point
         # Before determining the second VP, remove inliers as they already contributed to first VP
         path_lines_reduced, inliers = image_rectification.remove_inliers(vp2, path_lines,
-                                                                         HorizonDetectorLib.INLIER_THRESHOLD_HORIZON_SECOND)
+                                                                         HorizonDetectorLib.INLIER_FINAL_THRESHOLD)
 
         # Display the inliers
         if draw_features:
@@ -327,11 +342,11 @@ class HorizonDetectorLib:
         if postures is not None:
             path_lines = postures
 
-        model3 = HorizonDetectorLib.ransac_nadir_vp(path_lines, HorizonDetectorLib.INLIER_THRESHOLD_NADIR)
+        model3 = HorizonDetectorLib.ransac_nadir_vp(path_lines, constraints, HorizonDetectorLib.INLIER_THRESHOLD_NADIR)
         vp3 = model3 / model3[2]
 
         _, inliers = image_rectification.remove_inliers(vp3, path_lines,
-                                                        HorizonDetectorLib.INLIER_THRESHOLD_NADIR)
+                                                        HorizonDetectorLib.INLIER_FINAL_THRESHOLD)
 
         if draw_features:
             HorizonDetectorLib.show_inliers(path_lines, inliers, vp3, plot_axis, 'b')
@@ -348,7 +363,7 @@ class HorizonDetectorLib:
 
     # Using posture data, finds nadir vanishing point only
     @staticmethod
-    def ransac_nadir_vp(edgelets, threshold_inlier):
+    def ransac_nadir_vp(edgelets, constraints, threshold_inlier):
 
         # If no nadir vp is given, calculate it from postures and image lines
         locations, directions, strengths = edgelets
@@ -377,9 +392,11 @@ class HorizonDetectorLib:
                 current_model = np.cross(l1, l2)  # Potential vanishing point
                 current_model = current_model / current_model[2]
 
-                if np.sum(current_model ** 2) < 1 or current_model[2] == 0 or current_model[1] < 0:
-                    # reject degenerate candidates, which lie on the wrong side of the horizon
+                # reject degenerate candidates, which lie on the wrong side of the horizon
+                if np.sum(current_model ** 2) < 1 or current_model[2] == 0 or current_model[1] < 0 \
+                        or not image_rectification.check_constraint(current_model, constraints, True):
                     continue
+
 
                 current_votes = image_rectification.compute_votes(
                     edgelets, current_model, threshold_inlier)

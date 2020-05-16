@@ -128,7 +128,25 @@ def compute_votes(edgelets, model, threshold_inlier=5):
     return (theta < theta_thresh) * strengths
 
 
-def ransac_vanishing_point(edgelets, num_ransac_iter=2000, threshold_inlier=5):
+def check_constraint(model, constraints, is_below):
+
+    if constraints is None:
+        return True
+
+    for constraint in constraints:
+
+        p_1, p_2 = constraint
+
+        model = model / model[2]
+        if not is_below and (model[1] > p_1[1] or model[1] > p_2[1]):
+            return False
+        elif is_below and (model[1] < p_1[1] or model[1] < p_2[1]):
+            return False
+
+    return True
+
+
+def ransac_vanishing_point(edgelets, constraints, num_ransac_iter=2000, threshold_inlier=5):
     """Estimate vanishing point using Ransac.
 
     Parameters
@@ -176,9 +194,12 @@ def ransac_vanishing_point(edgelets, num_ransac_iter=2000, threshold_inlier=5):
 
         current_model = np.cross(l1, l2)
 
-        if np.sum(current_model ** 2) < 1 or current_model[2] == 0:
+        if np.sum(current_model ** 2) < 1 or current_model[2] == 0 \
+                or not check_constraint(current_model, constraints, False):
             # reject degenerate candidates
             continue
+
+        current_model = current_model / current_model[2]
 
         current_votes = compute_votes(
             edgelets, current_model, threshold_inlier)

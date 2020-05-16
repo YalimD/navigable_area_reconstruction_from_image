@@ -303,6 +303,12 @@ def processGTlines(image_dir, data):
 
 # endregion
 
+# Finds the mask pixel with lowest y
+def find_segmentation_offset(segmented_img):
+    indices = np.nonzero(segmented_img)
+
+    return min(indices[0]) if len(indices[0]) > 0 else 0
+
 
 # Main method that is used to rectify the ground plane
 def rectify_groundPlane(image_path,
@@ -365,17 +371,17 @@ def rectify_groundPlane(image_path,
 
     # Obtain the postures of the pedestrian as lines too, to find the VP
     # The sample taken every few frames can become a performance concern
-    pedestrian_posture_paths, pedestrian_postures, pedestrian_posture_trajectory = \
+    pedestrian_posture_paths, pedestrian_postures, pedestrian_posture_trajectory, raw_trajectories = \
         horizon_detector.HorizonDetectorLib.parse_pedestrian_detection(np.copy(image),
                                                                        detection_data_file,
                                                                        frames_per_check)
 
     # Single posture implementation requires pedestrian ID's
-    pedestrian_posture_paths_single, pedestrian_postures_single, pedestrian_posture_trajectory_single = \
-    horizon_detector.HorizonDetectorLib.parse_pedestrian_detection(np.copy(image),
-                                                                   detection_data_file,
-                                                                   5,
-                                                                   tracker_id=[2])  # Parameter
+    # pedestrian_posture_paths_single, pedestrian_postures_single, pedestrian_posture_trajectory_single = \
+    # horizon_detector.HorizonDetectorLib.parse_pedestrian_detection(np.copy(image),
+    #                                                                detection_data_file,
+    #                                                                5,
+    #                                                                tracker_id=[2])  # Parameter
 
     # We assume the people don't change their velocities much
     # and calculate a homography between a path with multiple detections
@@ -391,12 +397,13 @@ def rectify_groundPlane(image_path,
         # 'posture_lines': [pedestrian_posture_paths, pedestrian_postures, pedestrian_posture_trajectory],
         # 'single_lines': [pedestrian_posture_paths_single, pedestrian_postures_single,
         #                  pedestrian_posture_trajectory_single],
-        'hough': [image_lines, None, None],
-        # 'postures_hough': [
-        #     [np.concatenate((pedestrian_posture_paths[j], image_lines[j]), axis=0)
-        #      for j in range(3)],
-        #     pedestrian_postures,
-        #     pedestrian_posture_trajectory]
+        # 'hough': [image_lines, None, None, None],
+        'postures_hough': [
+            [np.concatenate((pedestrian_posture_paths[j], image_lines[j]), axis=0)
+             for j in range(3)],  # Used for horizon
+            pedestrian_postures,  # Used for nadir
+            pedestrian_posture_trajectory,  # Used for circular points
+            raw_trajectories]
     }
 
     row = int(np.sqrt(len(vp_determination_methods.keys())))
@@ -410,6 +417,8 @@ def rectify_groundPlane(image_path,
         # Determine the horizon
         lines = vp_determination_methods[k][0]
         postures = vp_determination_methods[k][1]
+        trajectories = vp_determination_methods[k][2]
+        raw_trajectories = vp_determination_methods[k][3]
 
         if row == 1 and col == 1:
             plot_axis = horizon_axis
@@ -419,15 +428,18 @@ def rectify_groundPlane(image_path,
         plot_axis.set_title(str(k))
         plot_axis.imshow(image)
 
+        data_not_provided = any(list(map(lambda x: x is None, [provided_horizon, provided_zenith, provided_focal])))
+
         # In case no suitable lines for horizon calculation is found, skip
         if len(lines[0]) > 0:
 
-            if any(list(map(lambda x: x is None, [provided_horizon, provided_zenith, provided_focal]))):
+            if data_not_provided:
 
-                leftVP, rightVP, zenith_vp = horizon_detector.HorizonDetectorLib.determineVP(
+                leftVP, rightVP, nadir_vp = horizon_detector.HorizonDetectorLib.determineVP(
                     lines,
                     plot_axis=plot_axis,
                     postures=postures,
+                    constraints=raw_trajectories,
                     draw_features=draw_features)
 
                 # TODO: TESTING GROUND_TRUTH
@@ -439,22 +451,100 @@ def rectify_groundPlane(image_path,
 
                 # If the data was trajectory, only horizon is found.
                 # Nadir needs to be found independently using the postures
-                if zenith_vp is None and postures is not None:
-                    zenith_vp = horizon_detector.HorizonDetectorLib.ransac_nadir_vp(pedestrian_postures,
-                                                                                    horizon,
-                                                                                    center)
-                # Find the focal_unity length from the triangle of vanishing points
-                focal_length = horizon_detector.HorizonDetectorLib.find_focal_length(horizon, zenith_vp)
+                if nadir_vp is None and postures is not None:
+                    nadir_vp = horizon_detector.HorizonDetectorLib.ransac_nadir_vp(pedestrian_postures,
+                                                                                   horizon,
+                                                                                   raw_trajectories,
+                                                                                   center)
+                nadir_vp = nadir_vp / nadir_vp[2]
+                focal_length = horizon_detector.HorizonDetectorLib.find_focal_length(horizon, nadir_vp)
 
-                zenith_vp = zenith_vp / zenith_vp[2]
             else:
 
-                leftVP = provided_horizon[:3]
-                rightVP = provided_horizon[3:]
+                leftVP = np.array(provided_horizon[:3])
+                rightVP = np.array(provided_horizon[3:])
                 horizon = [leftVP, rightVP]
 
-                zenith_vp = provided_zenith
+                nadir_vp = np.array(provided_zenith)
                 focal_length = provided_focal
+
+            # TODO: Separate these into methods
+            # region image_below_horizon
+            corners_homo = [[*corner, 1] for corner in image_points]
+
+            left_border = np.cross(corners_homo[0], corners_homo[3])
+            if left_border[2] == 0:
+                left_border[2] = 1
+            left_border = left_border / left_border[2]
+
+            right_border = np.cross(corners_homo[1], corners_homo[2])
+            if right_border[2] == 0:
+                right_border[2] = 1
+            right_border = right_border / right_border[2]
+
+            horizon_line = np.cross(horizon[0], horizon[1])
+            horizon_line = horizon_line / horizon_line[2]
+
+            corners_homo[0] = np.cross(left_border, horizon_line)
+            image_points[3] = (corners_homo[0] / corners_homo[0][2])[:2]
+            corners_homo[1] = np.cross(right_border, horizon_line)
+            image_points[2] = (corners_homo[1] / corners_homo[1][2])[:2]
+
+            image_points = [[min(max(0, pnt[0]), width), min(max(0, pnt[1]), height)] for pnt in image_points]
+
+            print("Image points: {}".format(image_points))
+
+            # The segments above the horizon shouldn't be considered navigable anyway
+            # but we make sure we crop those parts
+
+            total_offset = [int(max(image_points[3][0], image_points[0][0])),
+                            int(max(image_points[3][1], image_points[2][1]))]
+
+            # Cropping by slope of the horizon again
+            total_offset[1] += abs(image_points[3][1] - image_points[2][1])
+
+            right_crop = int(max(image_points[3][0], image_points[2][0]))
+
+            # The image is cropped according to horizon
+            image = image[total_offset[1]:,
+                          total_offset[0]:right_crop]
+
+            segmented_img = segmented_img[total_offset[1]:,
+                                          total_offset[0]:right_crop]
+
+            # Image is cropped according to segmentation pixel with lowest y coordinate
+            # This improves stability
+            segmentation_offset = find_segmentation_offset(segmented_img)
+
+            image = image[segmentation_offset:, :]
+            segmented_img = segmented_img[segmentation_offset:, :]
+
+            total_offset[1] = total_offset[1] + segmentation_offset
+
+            print("Total offset is {}".format(total_offset))
+
+            height, width, _ = image.shape
+
+            # Shift the trajectories as well
+            if trajectories:
+                for points in trajectories[0]:
+                    points -= total_offset
+
+            image_points = np.array([[0, height], [width, height], [width, 0], [0, 0]])
+            center = [width / 2, height / 2, 1]
+
+            # The coordinate system shifts with image, yet vanishing points should stay at the same
+            # location geometrically
+            leftVP[:2] -= total_offset
+            rightVP[:2] -= total_offset
+            nadir_vp[:2] -= total_offset
+
+            horizon = [leftVP, rightVP]
+
+            cv2.imshow("Cropped", image)
+            cv2.waitKey(0)
+
+            # endregion
 
             # region plot_horizons
 
@@ -496,44 +586,24 @@ def rectify_groundPlane(image_path,
 
             # endregion
 
-            fov = utils.focal_to_fov(focal_length, height)
-
-            print("Method: {}, left: {}, right: {}".format(k, leftVP[:2], rightVP[:2]))
-            print("nadir: {}, focal: {} with fov: {}".format(zenith_vp[:2], focal_length, fov))
-
-            with open(path.join(image_dir, "found_horizon.txt"), "w") as HorizonWriter:
-                HorizonWriter.write("Method: {}, left: {}, right: {},  nadir: {}, focal: {} with fov: {}"
-                                    .format(k, leftVP[:2], rightVP[:2], zenith_vp[:2], focal_length, fov))
-
             # Determine the region under the horizon in the image
             # as rectifying the image above horizon
             # causes problems. The image should be updated as such.
 
-            # region image_below_horizon
-            corners_homo = [[*corner, 1] for corner in image_points]
+            # region report horizon
 
-            left_border = np.cross(corners_homo[0], corners_homo[3])
-            left_border = left_border / left_border[2]
+            # Find the focal_unity length from the triangle of vanishing points
+            if data_not_provided:
+                focal_length = horizon_detector.HorizonDetectorLib.find_focal_length(horizon, nadir_vp)
 
-            right_border = np.cross(corners_homo[1], corners_homo[2])
-            right_border = right_border / right_border[2]
+            fov = utils.focal_to_fov(focal_length, height)
 
-            horizon_line = np.cross(horizon[0], horizon[1])
+            print("Method: {}, left: {}, right: {}".format(k, leftVP[:2], rightVP[:2]))
+            print("nadir: {}, focal: {} with fov: {}".format(nadir_vp[:2], focal_length, fov))
 
-            corners_homo[0] = np.cross(left_border, horizon_line)
-            image_points[3] = (corners_homo[0] / corners_homo[0][2])[:2]
-            corners_homo[1] = np.cross(right_border, horizon_line)
-            image_points[2] = (corners_homo[1] / corners_homo[1][2])[:2]
-
-            image_points = [[min(max(0, pnt[0]), width), min(max(0, pnt[1]), height)] for pnt in image_points]
-
-            # The segments above the horizon shouldn't be considered navigable anyway
-            # but we make sure we crop those parts
-            image = image[image_points[3][1]:,
-                    image_points[3][0]:]
-
-            segmented_img = segmented_img[image_points[3][1]:,
-                            image_points[3][0]:]
+            with open(path.join(image_dir, "found_horizon.txt"), "w") as HorizonWriter:
+                HorizonWriter.write("Method: {}, left: {}, right: {},  nadir: {}, focal: {} with fov: {}"
+                                    .format(k, leftVP[:2], rightVP[:2], nadir_vp[:2], focal_length, fov))
 
             # endregion
 
@@ -541,7 +611,7 @@ def rectify_groundPlane(image_path,
             warped_result_segmented, model_points, H = compute_homography_and_warp(segmented_img,
                                                                                    list(leftVP),
                                                                                    list(rightVP),
-                                                                                   vp_determination_methods[k][2],
+                                                                                   trajectories,
                                                                                    image_points,
                                                                                    method=k,
                                                                                    output_dir=image_dir)
@@ -553,7 +623,7 @@ def rectify_groundPlane(image_path,
             # - The rectified region should be a convex polygon
             # If any of them is not satisfied, then the original image should be returned
 
-            if check_polygon_convexity(model_points) is not True:
+            if not check_polygon_convexity(model_points):
                 # The rectification was unsucessful, restore the image
                 print("The perspective correction was unsuccessful, returning original result")
                 warped_result_segmented = image
