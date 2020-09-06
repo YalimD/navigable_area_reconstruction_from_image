@@ -10,6 +10,7 @@ References:
  "Auto-rectification of user photos." 2014 IEEE International Conference on Image Processing (ICIP). IEEE, 2014.
 * Bazin, Jean-Charles, and Marc Pollefeys. "3-line RANSAC for orthogonal  
  vanishing point detection." 2012 IEEE/RSJ International Conference on Intelligent Robots and Systems. IEEE, 2012.
+* Bose, Biswajit, and Eric Grimson. "Ground plane rectification by tracking moving objects." Proceedings of the Joint IEEE International Workshop on Visual Surveillance and Performance Evaluation of Tracking and Surveillance. 2003.
 
 Requires: (Tested on Python 3.7 with Anaconda)
 * OpenCV 4.2
