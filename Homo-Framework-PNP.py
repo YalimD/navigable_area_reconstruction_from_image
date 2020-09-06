@@ -470,84 +470,6 @@ def rectify_groundPlane(image_path,
                 nadir_vp = np.array(provided_zenith)
                 focal_length = provided_focal
 
-            # TODO: Separate these into methods
-            # # region image_below_horizon
-            # corners_homo = [[*corner, 1] for corner in image_points]
-            #
-            # left_border = np.cross(corners_homo[0], corners_homo[3])
-            # if left_border[2] == 0:
-            #     left_border[2] = 1
-            # left_border = left_border / left_border[2]
-            #
-            # right_border = np.cross(corners_homo[1], corners_homo[2])
-            # if right_border[2] == 0:
-            #     right_border[2] = 1
-            # right_border = right_border / right_border[2]
-            #
-            # horizon_line = np.cross(horizon[0], horizon[1])
-            # horizon_line = horizon_line / horizon_line[2]
-            #
-            # corners_homo[0] = np.cross(left_border, horizon_line)
-            # image_points[3] = (corners_homo[0] / corners_homo[0][2])[:2]
-            # corners_homo[1] = np.cross(right_border, horizon_line)
-            # image_points[2] = (corners_homo[1] / corners_homo[1][2])[:2]
-            #
-            # image_points = [[min(max(0, pnt[0]), width), min(max(0, pnt[1]), height)] for pnt in image_points]
-            #
-            # print("Image points: {}".format(image_points))
-            #
-            # # The segments above the horizon shouldn't be considered navigable anyway
-            # # but we make sure we crop those parts
-            #
-            # total_offset = [int(max(image_points[3][0], image_points[0][0])),
-            #                 int(max(image_points[3][1], image_points[2][1]))]
-            #
-            # # Cropping by slope of the horizon again
-            # total_offset[1] += abs(image_points[3][1] - image_points[2][1])
-            #
-            # right_crop = int(max(image_points[3][0], image_points[2][0]))
-            #
-            # # The image is cropped according to horizon
-            # image = image[total_offset[1]:,
-            #               total_offset[0]:right_crop]
-            #
-            # segmented_img = segmented_img[total_offset[1]:,
-            #                               total_offset[0]:right_crop]
-            #
-            # # Image is cropped according to segmentation pixel with lowest y coordinate
-            # # This improves stability
-            # segmentation_offset = find_segmentation_offset(segmented_img)
-            #
-            # image = image[segmentation_offset:, :]
-            # segmented_img = segmented_img[segmentation_offset:, :]
-            #
-            # total_offset[1] = total_offset[1] + segmentation_offset
-            #
-            # print("Total offset is {}".format(total_offset))
-            #
-            # height, width, _ = image.shape
-            #
-            # # Shift the trajectories as well
-            # if trajectories:
-            #     for points in trajectories[0]:
-            #         points -= total_offset
-            #
-            # image_points = np.array([[0, height], [width, height], [width, 0], [0, 0]])
-            # center = [width / 2, height / 2, 1]
-            #
-            # # The coordinate system shifts with image, yet vanishing points should stay at the same
-            # # location geometrically
-            # leftVP[:2] -= total_offset
-            # rightVP[:2] -= total_offset
-            # nadir_vp[:2] -= total_offset
-            #
-            # horizon = [leftVP, rightVP]
-            #
-            # cv2.imshow("Cropped", image)
-            # cv2.waitKey(0)
-            #
-            # # endregion
-
             # region plot_horizons
 
             plot_axis.imshow(image)
@@ -569,8 +491,6 @@ def rectify_groundPlane(image_path,
                 s = 0
                 for i in range(len(gt_Y)):
                     s += (abs(line_Y[i] - gt_Y[i]) ** 1)
-
-            # TODO: Find a better metric for horizon calculation
 
             plot_axis.plot(line_X, line_Y, color='r')
 
