@@ -104,6 +104,8 @@ def extract_circular_points(trajectory_lines, P, method, output_path=""):
                 ax.plot([intersection_x], [intersection_y], 'ro')
                 ax.plot([intersection_x], [-intersection_y], 'ro')
 
+        ax.tick_params(axis='both', which='major', labelsize=14)
+
         # Add the circle to the list
         circle = Circle((c_alpha, c_beta), radius, color='b', fill=False)
         circles.append(circle)
@@ -122,8 +124,8 @@ def extract_circular_points(trajectory_lines, P, method, output_path=""):
     ax.axis('scaled')
     ax.set_title("Trajectory Circular Points For {}".format(method))
 
-    plt.xlabel("alpha")
-    plt.ylabel("beta")
+    plt.xlabel("alpha", fontsize=17)
+    plt.ylabel("beta", fontsize=17)
     plt.show(block=False)
     fig.savefig(path.join(output_path, method + "_circular.png"))
 
@@ -425,7 +427,7 @@ def rectify_groundPlane(image_path,
         else:
             plot_axis = horizon_axis[i // col, i % col]
 
-        plot_axis.set_title(str(k))
+        # plot_axis.set_title(str(k))
         plot_axis.imshow(image)
 
         data_not_provided = any(list(map(lambda x: x is None, [provided_horizon, provided_zenith, provided_focal])))
@@ -469,82 +471,82 @@ def rectify_groundPlane(image_path,
                 focal_length = provided_focal
 
             # TODO: Separate these into methods
-            # region image_below_horizon
-            corners_homo = [[*corner, 1] for corner in image_points]
-
-            left_border = np.cross(corners_homo[0], corners_homo[3])
-            if left_border[2] == 0:
-                left_border[2] = 1
-            left_border = left_border / left_border[2]
-
-            right_border = np.cross(corners_homo[1], corners_homo[2])
-            if right_border[2] == 0:
-                right_border[2] = 1
-            right_border = right_border / right_border[2]
-
-            horizon_line = np.cross(horizon[0], horizon[1])
-            horizon_line = horizon_line / horizon_line[2]
-
-            corners_homo[0] = np.cross(left_border, horizon_line)
-            image_points[3] = (corners_homo[0] / corners_homo[0][2])[:2]
-            corners_homo[1] = np.cross(right_border, horizon_line)
-            image_points[2] = (corners_homo[1] / corners_homo[1][2])[:2]
-
-            image_points = [[min(max(0, pnt[0]), width), min(max(0, pnt[1]), height)] for pnt in image_points]
-
-            print("Image points: {}".format(image_points))
-
-            # The segments above the horizon shouldn't be considered navigable anyway
-            # but we make sure we crop those parts
-
-            total_offset = [int(max(image_points[3][0], image_points[0][0])),
-                            int(max(image_points[3][1], image_points[2][1]))]
-
-            # Cropping by slope of the horizon again
-            total_offset[1] += abs(image_points[3][1] - image_points[2][1])
-
-            right_crop = int(max(image_points[3][0], image_points[2][0]))
-
-            # The image is cropped according to horizon
-            image = image[total_offset[1]:,
-                          total_offset[0]:right_crop]
-
-            segmented_img = segmented_img[total_offset[1]:,
-                                          total_offset[0]:right_crop]
-
-            # Image is cropped according to segmentation pixel with lowest y coordinate
-            # This improves stability
-            segmentation_offset = find_segmentation_offset(segmented_img)
-
-            image = image[segmentation_offset:, :]
-            segmented_img = segmented_img[segmentation_offset:, :]
-
-            total_offset[1] = total_offset[1] + segmentation_offset
-
-            print("Total offset is {}".format(total_offset))
-
-            height, width, _ = image.shape
-
-            # Shift the trajectories as well
-            if trajectories:
-                for points in trajectories[0]:
-                    points -= total_offset
-
-            image_points = np.array([[0, height], [width, height], [width, 0], [0, 0]])
-            center = [width / 2, height / 2, 1]
-
-            # The coordinate system shifts with image, yet vanishing points should stay at the same
-            # location geometrically
-            leftVP[:2] -= total_offset
-            rightVP[:2] -= total_offset
-            nadir_vp[:2] -= total_offset
-
-            horizon = [leftVP, rightVP]
-
-            cv2.imshow("Cropped", image)
-            cv2.waitKey(0)
-
-            # endregion
+            # # region image_below_horizon
+            # corners_homo = [[*corner, 1] for corner in image_points]
+            #
+            # left_border = np.cross(corners_homo[0], corners_homo[3])
+            # if left_border[2] == 0:
+            #     left_border[2] = 1
+            # left_border = left_border / left_border[2]
+            #
+            # right_border = np.cross(corners_homo[1], corners_homo[2])
+            # if right_border[2] == 0:
+            #     right_border[2] = 1
+            # right_border = right_border / right_border[2]
+            #
+            # horizon_line = np.cross(horizon[0], horizon[1])
+            # horizon_line = horizon_line / horizon_line[2]
+            #
+            # corners_homo[0] = np.cross(left_border, horizon_line)
+            # image_points[3] = (corners_homo[0] / corners_homo[0][2])[:2]
+            # corners_homo[1] = np.cross(right_border, horizon_line)
+            # image_points[2] = (corners_homo[1] / corners_homo[1][2])[:2]
+            #
+            # image_points = [[min(max(0, pnt[0]), width), min(max(0, pnt[1]), height)] for pnt in image_points]
+            #
+            # print("Image points: {}".format(image_points))
+            #
+            # # The segments above the horizon shouldn't be considered navigable anyway
+            # # but we make sure we crop those parts
+            #
+            # total_offset = [int(max(image_points[3][0], image_points[0][0])),
+            #                 int(max(image_points[3][1], image_points[2][1]))]
+            #
+            # # Cropping by slope of the horizon again
+            # total_offset[1] += abs(image_points[3][1] - image_points[2][1])
+            #
+            # right_crop = int(max(image_points[3][0], image_points[2][0]))
+            #
+            # # The image is cropped according to horizon
+            # image = image[total_offset[1]:,
+            #               total_offset[0]:right_crop]
+            #
+            # segmented_img = segmented_img[total_offset[1]:,
+            #                               total_offset[0]:right_crop]
+            #
+            # # Image is cropped according to segmentation pixel with lowest y coordinate
+            # # This improves stability
+            # segmentation_offset = find_segmentation_offset(segmented_img)
+            #
+            # image = image[segmentation_offset:, :]
+            # segmented_img = segmented_img[segmentation_offset:, :]
+            #
+            # total_offset[1] = total_offset[1] + segmentation_offset
+            #
+            # print("Total offset is {}".format(total_offset))
+            #
+            # height, width, _ = image.shape
+            #
+            # # Shift the trajectories as well
+            # if trajectories:
+            #     for points in trajectories[0]:
+            #         points -= total_offset
+            #
+            # image_points = np.array([[0, height], [width, height], [width, 0], [0, 0]])
+            # center = [width / 2, height / 2, 1]
+            #
+            # # The coordinate system shifts with image, yet vanishing points should stay at the same
+            # # location geometrically
+            # leftVP[:2] -= total_offset
+            # rightVP[:2] -= total_offset
+            # nadir_vp[:2] -= total_offset
+            #
+            # horizon = [leftVP, rightVP]
+            #
+            # cv2.imshow("Cropped", image)
+            # cv2.waitKey(0)
+            #
+            # # endregion
 
             # region plot_horizons
 
@@ -575,6 +577,8 @@ def rectify_groundPlane(image_path,
             # Plot the points
             plot_axis.plot(leftVP[0], leftVP[1], 'bo')
             plot_axis.plot(rightVP[0], rightVP[1], 'bo')
+
+            plot_axis.tick_params(axis='both', which='major', labelsize=14)
 
             # Plot the zenith points
 
