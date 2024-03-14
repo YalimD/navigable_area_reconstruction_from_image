@@ -17,7 +17,9 @@ Requires: (Tested on Python 3.7 with Anaconda)
 * Numpy 
 * Skimage 0.16.2
 
-If you find this work useful, please cite:
+If you find this work useful, please cite
+
+Yalım Doğan, Sinan Sonlu, and Uğur Güdükbay. An Augmented Crowd Simulation System Using Automatic Determination of Navigable Areas. Computers & Graphics, 95:141–155, April 2021.
 
 ```
 @article{DOGAN2021141,
